@@ -1,0 +1,24 @@
+{
+  "name": "geoglows-grace",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "vite": "npm:rolldown-vite@7.2.5"
+  },
+  "overrides": {
+    "vite": "npm:rolldown-vite@7.2.5"
+  },
+  "dependencies": {
+    "@arcgis/core": "^4.34.8",
+    "@arcgis/map-components": "^4.34.9",
+    "plotly.js": "^3.3.1",
+    "vercel": "^50.5.0",
+    "zarrita": "^0.5.4"
+  }
+}
