@@ -20,15 +20,18 @@ import * as reactiveUtils from "@arcgis/core/core/reactiveUtils.js";
 
 import Plotly from "plotly.js/lib/core";
 import Scatter from "plotly.js/lib/scatter";
+
 import {FetchStore, get, open} from "zarrita";
 
 import {getOrFetchCoords} from "./db.js";
+
 import "./style.css";
 import "./modal.css"
 
 Plotly.register([Scatter]);
 
-const zarrUrl = "https://d2grb3c773p1iz.cloudfront.net/groundwater/GRC_gw_anomaly.zarr3";
+// const zarrUrl = "https://d2grb3c773p1iz.cloudfront.net/groundwater/GRC_gw_anomaly.zarr3";
+const zarrUrl = "https://d2grb3c773p1iz.cloudfront.net/groundwater/grace025gwanomaly.zarr";
 
 const mapElement = document.querySelector("arcgis-map");
 const timeSliderContainer = document.getElementById("timeSliderContainer");
@@ -336,7 +339,4 @@ mapElement.addEventListener("arcgisViewReadyChange", async () => {
       await main({map, view, boundaryLayer, aquiferId});
     });
   });
-  window.test = (id) => {
-    main({map, view, boundaryLayer, aquiferId: id});
-  }
 });

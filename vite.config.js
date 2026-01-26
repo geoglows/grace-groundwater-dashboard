@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import {defineConfig} from 'vite';
 
 export default defineConfig({
   define: {
@@ -9,6 +9,13 @@ export default defineConfig({
       define: {
         global: 'globalThis',
       },
+    },
+  },
+  server: {
+    watch: {
+      ignored: [
+        '**/data_processors/**',
+      ],
     },
   },
 });
