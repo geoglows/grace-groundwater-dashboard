@@ -24,6 +24,7 @@ import {FetchStore, get, open} from "zarrita";
 
 import {getOrFetchCoords} from "./db.js";
 import "./style.css";
+import "./modal.css"
 
 Plotly.register([Scatter]);
 
@@ -47,47 +48,49 @@ const timeDates = Array.from(timeIntegers.data).map((t) => {
   return baseDate;
 });
 
-const main = async ({map, view}) => {
+// --- Boundary layer (GeoJSON) ---
+const boundaryLayer = new GeoJSONLayer({
+  title: "Boundary",
+  url: "./aquifers.geojson",
+  definitionExpression: "1=0", // start with none selected
+  renderer: {
+    type: "simple",
+    symbol: {
+      type: "simple-fill",
+      color: [255, 255, 255, 0],
+      outline: {color: [0, 0, 0, 1], width: 2}
+    }
+  }
+});
+
+const main = async ({map, view, aquiferId}) => {
   const {lat, lon} = await coordsPromise;
   const cellSize = lat.data[1] - lat.data[0]; // ~0.25
   const HALF = cellSize / 2;
 
-  // --- Boundary layer (GeoJSON) ---
-  const boundaryLayer = new GeoJSONLayer({
-    title: "Boundary",
-    url: "./boundary.geojson",
-    renderer: {
-      type: "simple",
-      symbol: {
-        type: "simple-fill",
-        color: [255, 255, 255, 0],
-        outline: {color: [0, 0, 0, 1], width: 2}
-      }
-    }
-  });
-
-  map.layers.add(boundaryLayer);
-
   // Load boundary layer + zoom
   await boundaryLayer.load();
-  const boundaryExtent = boundaryLayer.fullExtent;
+
+  // Before adding to map (or after, either works)
+  boundaryLayer.definitionExpression = `id='${aquiferId}'`;
+  await boundaryLayer.refresh?.();
   await view.when();
-  await view.goTo(boundaryExtent.expand(1.2));
+  const boundaryExtent = await boundaryLayer.queryExtent()
+  const zoomPromise = view.goTo(boundaryExtent.extent);
 
   // ---- Get the actual boundary polygon geometry ----
   const q = boundaryLayer.createQuery();
+  q.where = `id='${aquiferId}'`;
   q.returnGeometry = true;
   q.outFields = [];
-  q.where = "1=1";
 
   const fs = await boundaryLayer.queryFeatures(q);
-  if (!fs.features.length) throw new Error("No features found in boundary.geojson");
-
+  if (!fs.features.length) throw new Error("No features found");
   const boundaryGeom = fs.features[0].geometry;
 
   // ---- Candidate cell centers limited by boundary extent ----
-  const filteredLats = lat.data.filter((y) => y >= boundaryExtent.ymin - HALF && y <= boundaryExtent.ymax + HALF);
-  const filteredLons = lon.data.filter((x) => x >= boundaryExtent.xmin - HALF && x <= boundaryExtent.xmax + HALF);
+  const filteredLats = lat.data.filter((y) => y >= boundaryExtent.extent.ymin - 2 * cellSize && y <= boundaryExtent.extent.ymax + 2 * cellSize);
+  const filteredLons = lon.data.filter((x) => x >= boundaryExtent.extent.xmin - 2 * cellSize && x <= boundaryExtent.extent.xmax + 2 * cellSize);
 
   // ---- Zarr reads (subset to bbox) ----
   const yStart = lat.data.indexOf(filteredLats[0]);
@@ -156,6 +159,7 @@ const main = async ({map, view}) => {
     }
     return result;
   }
+
   const lweMeanTimeSeries = meanIgnoringNaN(lweValues.data, lweValues.shape, lweValues.stride);
   const uncMeanTimeSeries = meanIgnoringNaN(uncValues.data, uncValues.shape, uncValues.stride);
 
@@ -191,7 +195,8 @@ const main = async ({map, view}) => {
 // --- build polygons ONCE ---
   const cellSource = intersectingCells
     .map(({lon, lat, frac, cell, intersects}, idx) => {
-      if (!intersects || frac < 0.5) return null;
+      // if (!intersects || frac < 0.5) return null;
+      if (!intersects) return null;
       return new Graphic({
         geometry: cell, // polygon
         attributes: {
@@ -240,7 +245,10 @@ const main = async ({map, view}) => {
     }
   });
 
-  map.layers.add(selectedCellsLayer);
+  const possiblyExistingLayer = map.layers.find(l => l.title === "GW Anomaly Cells");
+  if (possiblyExistingLayer) map.layers.remove(possiblyExistingLayer);
+  await zoomPromise; // ensure view is zoomed before plotting
+  map.layers.add(selectedCellsLayer, 0); // add to bottom of stack
 
 // ---- precompute lookup from feature idx -> oid (same in your case, but keep explicit) ----
   const oids = cellSource.map(g => g.attributes.oid);
@@ -284,6 +292,7 @@ const main = async ({map, view}) => {
   };
 
   // ---- TimeSlider ----
+  if (timeSliderContainer.firstChild) timeSliderContainer.firstChild.remove();
   const slider = new TimeSlider({
     container: timeSliderContainer,
     mode: "instant",
@@ -317,5 +326,17 @@ const main = async ({map, view}) => {
 mapElement.addEventListener("arcgisViewReadyChange", async () => {
   const map = mapElement.map;
   const view = mapElement.view;
-  await main({map, view});
+  map.add(boundaryLayer);
+
+  // add button listeners
+  document.querySelectorAll("[data-aquifer-id]").forEach(button => {
+    button.addEventListener("click", async () => {
+      const aquiferId = button.getAttribute("data-aquifer-id");
+      document.getElementById("info-modal").classList.add('hidden')
+      await main({map, view, boundaryLayer, aquiferId});
+    });
+  });
+  window.test = (id) => {
+    main({map, view, boundaryLayer, aquiferId: id});
+  }
 });
