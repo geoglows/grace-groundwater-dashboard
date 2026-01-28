@@ -8,6 +8,7 @@ import "@arcgis/map-components/components/arcgis-expand";
 import "@arcgis/map-components/components/arcgis-basemap-gallery";
 import "@arcgis/map-components/components/arcgis-legend";
 import "@arcgis/map-components/components/arcgis-sketch";
+import "@arcgis/map-components/components/arcgis-time-slider";
 
 import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer.js";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer.js";
@@ -16,7 +17,6 @@ import SpatialReference from "@arcgis/core/geometry/SpatialReference.js";
 import * as intersectionOperator from "@arcgis/core/geometry/operators/intersectionOperator.js";
 import * as shapePreservingProjectOperator from "@arcgis/core/geometry/operators/shapePreservingProjectOperator.js";
 import * as geometryEngine from "@arcgis/core/geometry/geometryEngine.js";
-import TimeSlider from "@arcgis/core/widgets/TimeSlider.js";
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils.js";
 
 import {cellPolygonFromCenter} from "./cells.js";
@@ -40,6 +40,7 @@ const arcgisMap = document.querySelector("arcgis-map");
 const timeSliderContainer = document.getElementById("timeSliderContainer");
 const arcgisLayerList = document.querySelector("arcgis-layer-list");
 const sketchTool = document.querySelector("arcgis-sketch");
+const timeSlider = document.querySelector("arcgis-time-slider");
 
 // todo: start these fetches all async in the same bit
 const coordsPromise = getOrFetchCoords({zarrUrl});
@@ -55,8 +56,6 @@ const timeDates = Array.from(timeIntegers.data).map((t) => {
   baseDate.setUTCDate(baseDate.getUTCDate() + Number(t));
   return baseDate;
 });
-
-let slider;
 
 const boundaryLayer = new GeoJSONLayer({
   title: "Aquifer Boundaries",
@@ -327,26 +326,21 @@ const main = async ({polygon, zoomPromise}) => {
     }).catch(console.error);
   };
 
-  // ---- TimeSlider ----
-  if (timeSliderContainer.firstChild) timeSliderContainer.firstChild.remove();
-  slider = new TimeSlider({
-    container: timeSliderContainer,
-    mode: "instant",
-    playRate: 500,
-    fullTimeExtent: {
-      start: timeDates[0],
-      end: timeDates[timeDates.length - 1]
-    },
-    stops: {dates: timeDates},
-    timeExtent: {
-      start: timeDates[0],
-      end: timeDates[0]
-    },
-    labelsVisible: true
-  });
+  // update the timeSlider web component
+  timeSlider.mode = "instant";
+  timeSlider.fullTimeExtent = {
+    start: timeDates[0],
+    end: timeDates[timeDates.length - 1]
+  };
+  timeSlider.stops = {dates: timeDates};
+  timeSlider.timeExtent = {
+    start: timeDates[0],
+    end: timeDates[0]
+  };
+  timeSlider.labelsVisible = true;
 
   reactiveUtils.watch(
-    () => slider.timeExtent,
+    () => timeSlider.widget.timeExtent,
     (te) => {
       const current = te?.start;
       if (!current) return;
@@ -411,11 +405,7 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
   document.getElementById("refresh-global-boundaries").addEventListener("click", async () => {
     boundaryLayer.definitionExpression = "1=1"; // reset to none selected
     // if the slider exists, stop it then remove it
-    if (slider) {
-      slider.stop();
-      timeSliderContainer.firstChild.remove();
-      slider = null;
-    }
+    timeSlider.widget.stop();
     // clear the plot contents
     document.getElementById("timeseries-plot").innerHTML = "";
     // remove the selected cells layer if it exists

@@ -22,24 +22,24 @@
   <button id="refresh-global-boundaries">Show All Boundaries</button>
 </div>
 <div class="body">
-  <arcgis-map item-id="a69f14ea2e784e019f4a4b6835ffd376" zoom="3" center="0,20" class="map-view">
-    <arcgis-zoom position="top-left"></arcgis-zoom>
-    <arcgis-locate position="top-left" scale="5000"></arcgis-locate>
-    <arcgis-expand position="top-right" title="Layer List">
+  <arcgis-map item-id="a69f14ea2e784e019f4a4b6835ffd376" zoom="2" center="0,20" class="map-view">
+    <arcgis-zoom slot="top-left"></arcgis-zoom>
+    <arcgis-locate slot="top-left" scale="5000"></arcgis-locate>
+    <arcgis-expand slot="top-right" title="Layer List">
       <arcgis-layer-list class="large-icon"></arcgis-layer-list>
     </arcgis-expand>
-    <arcgis-expand position="top-right" title="Basemap Gallery">
+    <arcgis-expand slot="top-right" title="Basemap Gallery">
       <arcgis-basemap-gallery></arcgis-basemap-gallery>
     </arcgis-expand>
-    <arcgis-expand position="top-right" title="Drawing Controls">
+    <arcgis-expand slot="top-right" title="Drawing Controls">
       <arcgis-sketch title="Draw Shapes"></arcgis-sketch>
     </arcgis-expand>
-    <arcgis-scale-bar position="bottom-right" bar-style="line" unit="dual"></arcgis-scale-bar>
-    <arcgis-expand position="bottom-left" title="Legend">
+    <arcgis-scale-bar slot="bottom-right" bar-style="line" unit="dual"></arcgis-scale-bar>
+    <arcgis-expand slot="bottom-right" title="Legend">
       <arcgis-legend></arcgis-legend>
     </arcgis-expand>
+    <arcgis-time-slider slot="bottom-left" play-rate="1000" layout="auto"></arcgis-time-slider>
   </arcgis-map>
-  <div id="timeSliderContainer"></div>
   <div id="timeseries-plot" class="chart-container"></div>
 </div>
 </body>
