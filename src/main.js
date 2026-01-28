@@ -404,11 +404,9 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
 
   document.getElementById("refresh-global-boundaries").addEventListener("click", async () => {
     boundaryLayer.definitionExpression = "1=1"; // reset to none selected
-    // if the slider exists, stop it then remove it
+    arcgisMap.view.goTo(boundaryLayer.fullExtent);
     timeSlider.widget.stop();
-    // clear the plot contents
     document.getElementById("timeseries-plot").innerHTML = "";
-    // remove the selected cells layer if it exists
     const possiblyExistingLayer = arcgisMap.map.layers.find(l => l.title === "GW Anomaly Cells");
     if (possiblyExistingLayer) arcgisMap.map.layers.remove(possiblyExistingLayer);
   })
