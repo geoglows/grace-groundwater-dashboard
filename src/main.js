@@ -11,12 +11,13 @@ import "@arcgis/map-components/components/arcgis-legend";
 import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer.js";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer.js";
 import Graphic from "@arcgis/core/Graphic.js";
-import Polygon from "@arcgis/core/geometry/Polygon.js";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference.js";
 import * as intersectionOperator from "@arcgis/core/geometry/operators/intersectionOperator.js";
 import * as geometryEngine from "@arcgis/core/geometry/geometryEngine.js";
 import TimeSlider from "@arcgis/core/widgets/TimeSlider.js";
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils.js";
+
+import {cellPolygonFromCenter} from "./cells.js";
 
 import Plotly from "plotly.js/lib/core";
 import Scatter from "plotly.js/lib/scatter";
@@ -33,8 +34,9 @@ Plotly.register([Scatter]);
 // const zarrUrl = "https://d2grb3c773p1iz.cloudfront.net/groundwater/GRC_gw_anomaly.zarr3";
 const zarrUrl = "https://d2grb3c773p1iz.cloudfront.net/groundwater/grace025gwanomaly.zarr";
 
-const mapElement = document.querySelector("arcgis-map");
+const arcgisMap = document.querySelector("arcgis-map");
 const timeSliderContainer = document.getElementById("timeSliderContainer");
+const arcgisLayerList = document.querySelector("arcgis-layer-list");
 
 // todo: start these fetches all async in the same bit
 const coordsPromise = getOrFetchCoords({zarrUrl});
@@ -57,7 +59,7 @@ let slider;
 
 // --- Boundary layer (GeoJSON) ---
 const boundaryLayer = new GeoJSONLayer({
-  title: "Boundary",
+  title: "Aquifer Boundaries",
   url: "./aquifers.geojson",
   outFields: ["*"],
   definitionExpression: "1=1", // start with none selected
@@ -71,16 +73,51 @@ const boundaryLayer = new GeoJSONLayer({
   },
   popupTemplate: {
     title: "{n}",
+    // overwriteActions: true,
+    dockEnabled: false,
+    dockOptions: {
+      buttonEnabled: false,
+      breakpoint: false
+    },
     attributes: {
       id: {fieldName: "id"},
     },
-    actions: [{
-      title: "Select Aquifer",
-      id: "select-aquifer",
-      className: "esri-icon-check-mark",
-    }]
+    actions: [],
+    content: () => {
+      const div = document.createElement("div");
+      div.innerHTML = `<div role="button" style="border: 1px solid black; padding: 8px; margin-top: 8px; text-align: center; font-weight: bold; background-color: #0079c1; color: white; cursor: pointer;">Analyze This Aquifer</div>`
+      div.onclick = () => {
+        main({aquiferId: view.popup.selectedFeature.attributes.id});
+        view.popup.close();
+      }
+      return div;
+    }
   }
 });
+
+function meanIgnoringNaN(data, shape, stride) {
+  const [T, Y, X] = shape;
+  const [sT, sY, sX] = stride;
+
+  const result = new Float64Array(T);
+  for (let t = 0; t < T; t++) {
+    let sum = 0;
+    let count = 0;
+    const tOffset = t * sT;
+    for (let y = 0; y < Y; y++) {
+      const yOffset = tOffset + y * sY;
+      for (let x = 0; x < X; x++) {
+        const v = data[yOffset + x * sX];
+        if (!Number.isNaN(v)) {
+          sum += v;
+          count++;
+        }
+      }
+    }
+    result[t] = count > 0 ? sum / count : NaN;
+  }
+  return result;
+}
 
 const main = async ({aquiferId}) => {
   const {lat, lon} = await coordsPromise;
@@ -121,26 +158,12 @@ const main = async ({aquiferId}) => {
   let lweValues = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
   let uncValues = get(uncNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
 
-  // ---- Builds a square cell polygon given the xy of the center
-  function cellPolygonFromCenter(xCenter, yCenter) {
-    return new Polygon({
-      spatialReference: SpatialReference.WGS84,
-      rings: [[
-        [xCenter - HALF, yCenter - HALF],
-        [xCenter - HALF, yCenter + HALF],
-        [xCenter + HALF, yCenter + HALF],
-        [xCenter + HALF, yCenter - HALF],
-        [xCenter - HALF, yCenter - HALF]
-      ]]
-    });
-  }
-
   // ---- Find selected cells (>50% contained) ----
   intersectionOperator.accelerateGeometry(boundaryGeom);
   const intersectingCells = [];
   for (const y of filteredLats) {
     for (const x of filteredLons) {
-      const cell = cellPolygonFromCenter(x, y);
+      const cell = cellPolygonFromCenter({xCenter: x, yCenter: y, halfWidth: HALF});
       const cellArea = geometryEngine.geodesicArea(cell);
 
       const intersectsGeom = intersectionOperator.execute(boundaryGeom, cell);
@@ -154,40 +177,12 @@ const main = async ({aquiferId}) => {
   // ---- Resolve zarr reads ----
   lweValues = await lweValues;
   uncValues = await uncValues;
-
-  // ---- Mean ignoring NaN helper ----
-  function meanIgnoringNaN(data, shape, stride) {
-    const [T, Y, X] = shape;
-    const [sT, sY, sX] = stride;
-
-    const result = new Float64Array(T);
-    for (let t = 0; t < T; t++) {
-      let sum = 0;
-      let count = 0;
-      const tOffset = t * sT;
-      for (let y = 0; y < Y; y++) {
-        const yOffset = tOffset + y * sY;
-        for (let x = 0; x < X; x++) {
-          const v = data[yOffset + x * sX];
-          if (!Number.isNaN(v)) {
-            sum += v;
-            count++;
-          }
-        }
-      }
-      result[t] = count > 0 ? sum / count : NaN;
-    }
-    return result;
-  }
-
   const lweMeanTimeSeries = meanIgnoringNaN(lweValues.data, lweValues.shape, lweValues.stride);
   const uncMeanTimeSeries = meanIgnoringNaN(uncValues.data, uncValues.shape, uncValues.stride);
 
   // ---- Plotly time series ----
-  const xValues = timeDates;
-
   const trace1 = {
-    x: xValues,
+    x: timeDates,
     y: Array.from(lweMeanTimeSeries),
     mode: "lines",
     name: "LWE Anomaly",
@@ -195,7 +190,7 @@ const main = async ({aquiferId}) => {
   };
 
   const trace2 = {
-    x: xValues.concat(xValues.slice().reverse()),
+    x: timeDates.concat(timeDates.slice().reverse()),
     y: Array.from(lweMeanTimeSeries).map((v, i) => v + uncMeanTimeSeries[i])
       .concat(Array.from(lweMeanTimeSeries).map((v, i) => v - uncMeanTimeSeries[i]).reverse()),
     fill: "toself",
@@ -205,18 +200,22 @@ const main = async ({aquiferId}) => {
     showlegend: true
   };
 
-  Plotly.newPlot("timeseries-plot", [trace2, trace1], {
-    title: "Mean LWE Anomaly Time Series with Uncertainty",
-    xaxis: {title: "Time Step"},
-    yaxis: {title: "LWE Anomaly (cm)"},
-    legend: {orientation: "h", y: -0.2}
-  }, {responsive: true});
+  Plotly.newPlot(
+    "timeseries-plot",
+    [trace2, trace1],
+    {
+      title: "Mean LWE Anomaly Time Series with Uncertainty",
+      xaxis: {title: "Time"},
+      yaxis: {title: "LWE Anomaly (cm)"},
+      legend: {orientation: "v"},
+    },
+    {
+      responsive: true,
+    });
 
-// --- build polygons ONCE ---
   const cellSource = intersectingCells
     .map(({lon, lat, frac, cell, intersects}, idx) => {
-      // if (!intersects || frac < 0.5) return null;
-      if (!intersects) return null;
+      if (!intersects || frac < 0.35) return null;
       return new Graphic({
         geometry: cell, // polygon
         attributes: {
@@ -231,7 +230,6 @@ const main = async ({aquiferId}) => {
     })
     .filter(Boolean);
 
-// --- client-side FeatureLayer so renderer/legend can use field-based visualVariables ---
   const selectedCellsLayer = new FeatureLayer({
     title: "GW Anomaly Cells",
     source: cellSource,
@@ -245,7 +243,6 @@ const main = async ({aquiferId}) => {
       {name: "value", type: "double"}
     ],
     geometryType: "polygon",
-    // IMPORTANT: your geometries are WGS84 polygons
     spatialReference: SpatialReference.WGS84,
     renderer: {
       type: "simple",
@@ -297,17 +294,22 @@ const main = async ({aquiferId}) => {
 
       await selectedCellsLayer.applyEdits({updateFeatures});
 
-      Plotly.relayout("timeseries-plot", {
-        shapes: [{
-          type: "line",
-          x0: timeDates[timeStep],
-          x1: timeDates[timeStep],
-          y0: 0,
-          y1: 1,
-          yref: "paper",
-          line: {color: "red", width: 2, dash: "dot"}
-        }]
-      });
+      Plotly.relayout("timeseries-plot",
+        {
+          shapes: [{
+            type: "line",
+            x0: timeDates[timeStep],
+            x1: timeDates[timeStep],
+            y0: 0,
+            y1: 1,
+            yref: "paper",
+            line: {color: "red", width: 2, dash: "dot"}
+          }],
+        },
+        {
+          title: `Mean LWE Anomaly Time Series`,
+        }
+      );
     }).catch(console.error);
   };
 
@@ -343,12 +345,19 @@ const main = async ({aquiferId}) => {
   updateMapToTimeStep(0);
 }
 
-mapElement.addEventListener("arcgisViewReadyChange", async () => {
-  // update the global map and view references after the map is ready
-  map = mapElement.map;
-  view = mapElement.view;
+arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
+  map = arcgisMap.map;
+  view = arcgisMap.view;
+  await map.when();
   await view.when()
   map.add(boundaryLayer);
+
+  view.popup.dockEnabled = false;
+  view.popup.dockOptions = {
+    buttonEnabled: false,
+    breakpoint: false
+  };
+
 
   // when an action is triggered from the popups
   reactiveUtils.on(
@@ -361,6 +370,38 @@ mapElement.addEventListener("arcgisViewReadyChange", async () => {
       }
     },
   );
+
+  arcgisLayerList.listItemCreatedFunction = (event) => {
+    const item = event.item;
+    if (item.layer.title === "Aquifer Boundaries") {
+      item.actionsSections = [[
+        {
+          title: "Zoom to Full Extent",
+          id: "full-extent-aquifers",
+          icon: "zoom-out-fixed"
+        }
+      ]];
+    } else if (item.layer.title === "GW Anomaly Cells") {
+      item.actionsSections = [[
+        {
+          title: "Zoom to Full Extent",
+          id: "full-extent-gwcells",
+          icon: "zoom-out-fixed"
+        }
+      ]];
+    }
+  }
+
+  arcgisLayerList.addEventListener("arcgisTriggerAction", (event) => {
+    if (event.detail.action.id === "full-extent-aquifers") {
+      view.goTo(boundaryLayer.fullExtent);
+    } else if (event.detail.action.id === "full-extent-gwcells") {
+      const gwCellsLayer = map.layers.find(l => l.title === "GW Anomaly Cells");
+      if (gwCellsLayer) {
+        view.goTo(gwCellsLayer.fullExtent);
+      }
+    }
+  })
 
   document.getElementById("refresh-global-boundaries").addEventListener("click", async () => {
     boundaryLayer.definitionExpression = "1=1"; // reset to none selected

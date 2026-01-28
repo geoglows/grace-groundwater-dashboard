@@ -18,7 +18,7 @@
     "@arcgis/core": "^4.34.8",
     "@arcgis/map-components": "^4.34.9",
     "plotly.js": "^3.3.1",
-    "vercel": "^50.5.0",
+    "vercel": "^50.8.1",
     "zarrita": "^0.5.4"
   }
 }
