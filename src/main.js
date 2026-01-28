@@ -37,10 +37,10 @@ Plotly.register([Scatter]);
 const zarrUrl = "https://d2grb3c773p1iz.cloudfront.net/groundwater/grace025gwanomaly.zarr";
 
 const arcgisMap = document.querySelector("arcgis-map");
-const timeSliderContainer = document.getElementById("timeSliderContainer");
 const arcgisLayerList = document.querySelector("arcgis-layer-list");
 const sketchTool = document.querySelector("arcgis-sketch");
 const timeSlider = document.querySelector("arcgis-time-slider");
+const appInstructions = document.getElementById("timeseries-plot").innerHTML;
 
 // todo: start these fetches all async in the same bit
 const coordsPromise = getOrFetchCoords({zarrUrl});
@@ -353,6 +353,16 @@ const main = async ({polygon, zoomPromise}) => {
   updateMapToTimeStep(0);
 }
 
+const resetLayers = () => {
+  sketchTool.layer.removeAll();
+  boundaryLayer.definitionExpression = "1=1"; // reset to none selected
+  arcgisMap.view.goTo(boundaryLayer.fullExtent);
+  timeSlider.widget.stop();
+  document.getElementById("timeseries-plot").innerHTML = appInstructions;
+  const possiblyExistingLayer = arcgisMap.map.layers.find(l => l.title === "GW Anomaly Cells");
+  if (possiblyExistingLayer) arcgisMap.map.layers.remove(possiblyExistingLayer);
+}
+
 arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
   await arcgisMap.map.when();
   await arcgisMap.view.when()
@@ -386,7 +396,7 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
           title: "Zoom to Full Extent",
           id: "full-extent-gwcells",
           icon: "zoom-out-fixed"
-        }
+        },
       ]];
     }
   }
@@ -399,16 +409,13 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
       if (gwCellsLayer) {
         arcgisMap.view.goTo(gwCellsLayer.fullExtent);
       }
+    } else if (event.detail.action.id === "reset-selections") {
+      resetLayers();
     }
   })
 
-  document.getElementById("refresh-global-boundaries").addEventListener("click", async () => {
-    boundaryLayer.definitionExpression = "1=1"; // reset to none selected
-    arcgisMap.view.goTo(boundaryLayer.fullExtent);
-    timeSlider.widget.stop();
-    document.getElementById("timeseries-plot").innerHTML = "";
-    const possiblyExistingLayer = arcgisMap.map.layers.find(l => l.title === "GW Anomaly Cells");
-    if (possiblyExistingLayer) arcgisMap.map.layers.remove(possiblyExistingLayer);
-  })
+  document
+    .querySelector("calcite-action#refresh-layers")
+    .addEventListener("click", async () => resetLayers())
 
 });
