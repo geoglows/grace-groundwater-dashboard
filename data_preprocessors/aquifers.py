@@ -11,6 +11,7 @@ gdf = (
     .assign(Broader=lambda df: df['Broader'].str.replace('-', 'ZZZZ'))
     .sort_values(by=['Broader', 'Aquifer'])
     .assign(Broader=lambda df: df['Broader'].str.replace('ZZZZ', ''))
+    .to_crs(epsg=4326)
 )
 
 # fix a known typo "Bohemian Cretaceuos Basin" -> "Bohemian Cretaceous Basin"
@@ -25,12 +26,12 @@ gdf = gdf.dissolve(by='Broader', as_index=False, aggfunc={'Aquifer': 'first'})
 gdf = gdf.reset_index(drop=True).reset_index(names='id')
 gdf = gdf[['Broader', 'id', 'geometry']].rename(columns={'Broader': 'n'})
 
-gdf.to_parquet('./aquifers.parquet', index=False, compression='snappy')
+gdf.to_parquet('./aquifers.parquet', index=False, engine='pyarrow', compression='gzip')
 gdf.to_file('./aquifers.geojson', driver='GeoJSON')
 
-table = [
-    f'<tr><td>{row.n}</td><td><button data-aquifer-id="{row.id}">Open Aquifer</button></td></tr>'
-    for row in gdf[['n', 'id']].itertuples()
-]
-with open('./aquifers_table.html', 'w') as f:
-    f.write('\n'.join(table))
+# table = [
+#     f'<tr><td>{row.n}</td><td><button data-aquifer-id="{row.id}">Open Aquifer</button></td></tr>'
+#     for row in gdf[['n', 'id']].itertuples()
+# ]
+# with open('./aquifers_table.html', 'w') as f:
+#     f.write('\n'.join(table))

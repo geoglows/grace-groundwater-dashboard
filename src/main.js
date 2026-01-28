@@ -51,11 +51,16 @@ const timeDates = Array.from(timeIntegers.data).map((t) => {
   return baseDate;
 });
 
+let map;
+let view;
+let slider;
+
 // --- Boundary layer (GeoJSON) ---
 const boundaryLayer = new GeoJSONLayer({
   title: "Boundary",
   url: "./aquifers.geojson",
-  definitionExpression: "1=0", // start with none selected
+  outFields: ["*"],
+  definitionExpression: "1=1", // start with none selected
   renderer: {
     type: "simple",
     symbol: {
@@ -63,11 +68,24 @@ const boundaryLayer = new GeoJSONLayer({
       color: [255, 255, 255, 0],
       outline: {color: [0, 0, 0, 1], width: 2}
     }
+  },
+  popupTemplate: {
+    title: "{n}",
+    attributes: {
+      id: {fieldName: "id"},
+    },
+    actions: [{
+      title: "Select Aquifer",
+      id: "select-aquifer",
+      className: "esri-icon-check-mark",
+    }]
   }
 });
 
-const main = async ({map, view, aquiferId}) => {
+const main = async ({aquiferId}) => {
   const {lat, lon} = await coordsPromise;
+  await map.when();
+  await view.when();
   const cellSize = lat.data[1] - lat.data[0]; // ~0.25
   const HALF = cellSize / 2;
 
@@ -77,7 +95,6 @@ const main = async ({map, view, aquiferId}) => {
   // Before adding to map (or after, either works)
   boundaryLayer.definitionExpression = `id='${aquiferId}'`;
   await boundaryLayer.refresh?.();
-  await view.when();
   const boundaryExtent = await boundaryLayer.queryExtent()
   const zoomPromise = view.goTo(boundaryExtent.extent);
 
@@ -104,16 +121,16 @@ const main = async ({map, view, aquiferId}) => {
   let lweValues = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
   let uncValues = get(uncNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
 
-  // ---- Helper: build a 0.25° cell polygon from center ----
-  function cellPolygonFromCenter(x, y) {
+  // ---- Builds a square cell polygon given the xy of the center
+  function cellPolygonFromCenter(xCenter, yCenter) {
     return new Polygon({
       spatialReference: SpatialReference.WGS84,
       rings: [[
-        [x - HALF, y - HALF],
-        [x - HALF, y + HALF],
-        [x + HALF, y + HALF],
-        [x + HALF, y - HALF],
-        [x - HALF, y - HALF]
+        [xCenter - HALF, yCenter - HALF],
+        [xCenter - HALF, yCenter + HALF],
+        [xCenter + HALF, yCenter + HALF],
+        [xCenter + HALF, yCenter - HALF],
+        [xCenter - HALF, yCenter - HALF]
       ]]
     });
   }
@@ -296,7 +313,7 @@ const main = async ({map, view, aquiferId}) => {
 
   // ---- TimeSlider ----
   if (timeSliderContainer.firstChild) timeSliderContainer.firstChild.remove();
-  const slider = new TimeSlider({
+  slider = new TimeSlider({
     container: timeSliderContainer,
     mode: "instant",
     playRate: 500,
@@ -327,16 +344,37 @@ const main = async ({map, view, aquiferId}) => {
 }
 
 mapElement.addEventListener("arcgisViewReadyChange", async () => {
-  const map = mapElement.map;
-  const view = mapElement.view;
+  // update the global map and view references after the map is ready
+  map = mapElement.map;
+  view = mapElement.view;
+  await view.when()
   map.add(boundaryLayer);
 
-  // add button listeners
-  document.querySelectorAll("[data-aquifer-id]").forEach(button => {
-    button.addEventListener("click", async () => {
-      const aquiferId = button.getAttribute("data-aquifer-id");
-      document.getElementById("info-modal").classList.add('hidden')
-      await main({map, view, boundaryLayer, aquiferId});
-    });
-  });
+  // when an action is triggered from the popups
+  reactiveUtils.on(
+    () => view.popup,
+    "trigger-action",
+    (event) => {
+      if (event.action.id === "select-aquifer") {
+        main({aquiferId: view.popup.selectedFeature.attributes.id});
+        view.popup.close();
+      }
+    },
+  );
+
+  document.getElementById("refresh-global-boundaries").addEventListener("click", async () => {
+    boundaryLayer.definitionExpression = "1=1"; // reset to none selected
+    // if the slider exists, stop it then remove it
+    if (slider) {
+      slider.stop();
+      timeSliderContainer.firstChild.remove();
+      slider = null;
+    }
+    // clear the plot contents
+    document.getElementById("timeseries-plot").innerHTML = "";
+    // remove the selected cells layer if it exists
+    const possiblyExistingLayer = map.layers.find(l => l.title === "GW Anomaly Cells");
+    if (possiblyExistingLayer) map.layers.remove(possiblyExistingLayer);
+  })
+
 });

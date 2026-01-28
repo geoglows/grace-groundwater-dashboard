@@ -41,7 +41,6 @@ arcgis-map {
     height: 30%;
     width: 100%;
     box-sizing: border-box;
-    background-color: white;
     flex: 1 1 auto;
 }
 
