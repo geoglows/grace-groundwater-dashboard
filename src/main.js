@@ -56,8 +56,6 @@ const timeDates = Array.from(timeIntegers.data).map((t) => {
   return baseDate;
 });
 
-let map;
-let view;
 let slider;
 
 const boundaryLayer = new GeoJSONLayer({
@@ -89,8 +87,8 @@ const boundaryLayer = new GeoJSONLayer({
       const div = document.createElement("div");
       div.innerHTML = `<div role="button" style="border: 1px solid black; padding: 8px; margin-top: 8px; text-align: center; font-weight: bold; background-color: #0079c1; color: white; cursor: pointer;">Analyze This Aquifer</div>`
       div.onclick = () => {
-        analyzeGlobalAquifer({aquiferId: view.popup.selectedFeature.attributes.id});
-        view.popup.close();
+        analyzeGlobalAquifer({aquiferId: arcgisMap.view.popup.selectedFeature.attributes.id});
+        arcgisMap.view.popup.close();
       }
       return div;
     }
@@ -129,7 +127,7 @@ const analyzeGlobalAquifer = async ({aquiferId}) => {
   boundaryLayer.definitionExpression = `id='${aquiferId}'`;
   await boundaryLayer.refresh?.();
   const boundaryExtent = await boundaryLayer.queryExtent()
-  const zoomPromise = view.goTo(boundaryExtent.extent);
+  const zoomPromise = arcgisMap.view.goTo(boundaryExtent.extent);
 
   // ---- Get the actual boundary polygon geometry ----
   const q = boundaryLayer.createQuery();
@@ -156,8 +154,8 @@ const analyzeDrawnPolygon = async ({polygon}) => {
 
 const main = async ({polygon, zoomPromise}) => {
   const {lat, lon} = await coordsPromise;
-  await map.when();
-  await view.when();
+  await arcgisMap.map.when();
+  await arcgisMap.view.when();
   const cellSize = lat.data[1] - lat.data[0]; // ~0.25
   const HALF = cellSize / 2;
 
@@ -278,10 +276,10 @@ const main = async ({polygon, zoomPromise}) => {
     }
   });
 
-  const possiblyExistingLayer = map.layers.find(l => l.title === "GW Anomaly Cells");
-  if (possiblyExistingLayer) map.layers.remove(possiblyExistingLayer);
+  const possiblyExistingLayer = arcgisMap.map.layers.find(l => l.title === "GW Anomaly Cells");
+  if (possiblyExistingLayer) arcgisMap.map.layers.remove(possiblyExistingLayer);
   await zoomPromise; // ensure view is zoomed before plotting
-  map.layers.add(selectedCellsLayer, 0); // add to bottom of stack
+  arcgisMap.map.layers.add(selectedCellsLayer, 0); // add to bottom of stack
 
 // ---- precompute lookup from feature idx -> oid (same in your case, but keep explicit) ----
   const oids = cellSource.map(g => g.attributes.oid);
@@ -362,11 +360,9 @@ const main = async ({polygon, zoomPromise}) => {
 }
 
 arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
-  map = arcgisMap.map;
-  view = arcgisMap.view;
-  await map.when();
-  await view.when()
-  map.addMany([boundaryLayer])
+  await arcgisMap.map.when();
+  await arcgisMap.view.when()
+  arcgisMap.map.addMany([boundaryLayer])
 
   sketchTool.availableCreateTools = ["polygon"];
   sketchTool.layer.title = "User drawn polygons";
@@ -403,11 +399,11 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
 
   arcgisLayerList.addEventListener("arcgisTriggerAction", (event) => {
     if (event.detail.action.id === "full-extent-aquifers") {
-      view.goTo(boundaryLayer.fullExtent);
+      arcgisMap.view.goTo(boundaryLayer.fullExtent);
     } else if (event.detail.action.id === "full-extent-gwcells") {
-      const gwCellsLayer = map.layers.find(l => l.title === "GW Anomaly Cells");
+      const gwCellsLayer = arcgisMap.map.layers.find(l => l.title === "GW Anomaly Cells");
       if (gwCellsLayer) {
-        view.goTo(gwCellsLayer.fullExtent);
+        arcgisMap.view.goTo(gwCellsLayer.fullExtent);
       }
     }
   })
@@ -423,8 +419,8 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
     // clear the plot contents
     document.getElementById("timeseries-plot").innerHTML = "";
     // remove the selected cells layer if it exists
-    const possiblyExistingLayer = map.layers.find(l => l.title === "GW Anomaly Cells");
-    if (possiblyExistingLayer) map.layers.remove(possiblyExistingLayer);
+    const possiblyExistingLayer = arcgisMap.map.layers.find(l => l.title === "GW Anomaly Cells");
+    if (possiblyExistingLayer) arcgisMap.map.layers.remove(possiblyExistingLayer);
   })
 
 });
