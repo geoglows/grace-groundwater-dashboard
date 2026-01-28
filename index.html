@@ -8,15 +8,6 @@
   <script type="module" src="/src/main.js" defer></script>
 </head>
 <body>
-
-<div id="info-modal" class="modal hidden">
-  <div class="modal-content">
-    <h2>GEOGLOWS GRACE Groundwater Assessment Tool</h2>
-    <p>This is an experimental implementation of an algorithm to identify changes in groundwater storage derived primarily from GRACE and GLDAS.</p>
-    <button onclick="document.getElementById('info-modal').classList.toggle('hidden')">Close</button>
-  </div>
-</div>
-
 <div class="nav-bar">
   <h1>GEOGLOWS GRACE Groundwater Assessment</h1>
 </div>
@@ -50,6 +41,14 @@
       <p>Use the time slider below the map to explore changes over time.</p>
       <p>To reset the map and make a new selection, use the refresh icon on the rop right of the map.</p>
     </div>
+  </div>
+</div>
+
+<div id="info-modal" class="modal">
+  <div class="modal-content">
+    <h2>GEOGLOWS GRACE Groundwater Assessment Tool</h2>
+    <p>This is an experimental implementation of an algorithm to identify changes in groundwater storage derived primarily from GRACE and GLDAS.</p>
+    <button onclick="document.getElementById('info-modal').classList.toggle('hidden')">Close</button>
   </div>
 </div>
 </body>
