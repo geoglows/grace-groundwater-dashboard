@@ -7,12 +7,14 @@ import "@arcgis/map-components/components/arcgis-scale-bar";
 import "@arcgis/map-components/components/arcgis-expand";
 import "@arcgis/map-components/components/arcgis-basemap-gallery";
 import "@arcgis/map-components/components/arcgis-legend";
+import "@arcgis/map-components/components/arcgis-sketch";
 
 import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer.js";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer.js";
 import Graphic from "@arcgis/core/Graphic.js";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference.js";
 import * as intersectionOperator from "@arcgis/core/geometry/operators/intersectionOperator.js";
+import * as shapePreservingProjectOperator from "@arcgis/core/geometry/operators/shapePreservingProjectOperator.js";
 import * as geometryEngine from "@arcgis/core/geometry/geometryEngine.js";
 import TimeSlider from "@arcgis/core/widgets/TimeSlider.js";
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils.js";
@@ -37,6 +39,7 @@ const zarrUrl = "https://d2grb3c773p1iz.cloudfront.net/groundwater/grace025gwano
 const arcgisMap = document.querySelector("arcgis-map");
 const timeSliderContainer = document.getElementById("timeSliderContainer");
 const arcgisLayerList = document.querySelector("arcgis-layer-list");
+const sketchTool = document.querySelector("arcgis-sketch");
 
 // todo: start these fetches all async in the same bit
 const coordsPromise = getOrFetchCoords({zarrUrl});
@@ -57,7 +60,6 @@ let map;
 let view;
 let slider;
 
-// --- Boundary layer (GeoJSON) ---
 const boundaryLayer = new GeoJSONLayer({
   title: "Aquifer Boundaries",
   url: "./aquifers.geojson",
@@ -87,7 +89,7 @@ const boundaryLayer = new GeoJSONLayer({
       const div = document.createElement("div");
       div.innerHTML = `<div role="button" style="border: 1px solid black; padding: 8px; margin-top: 8px; text-align: center; font-weight: bold; background-color: #0079c1; color: white; cursor: pointer;">Analyze This Aquifer</div>`
       div.onclick = () => {
-        main({aquiferId: view.popup.selectedFeature.attributes.id});
+        analyzeGlobalAquifer({aquiferId: view.popup.selectedFeature.attributes.id});
         view.popup.close();
       }
       return div;
@@ -119,13 +121,7 @@ function meanIgnoringNaN(data, shape, stride) {
   return result;
 }
 
-const main = async ({aquiferId}) => {
-  const {lat, lon} = await coordsPromise;
-  await map.when();
-  await view.when();
-  const cellSize = lat.data[1] - lat.data[0]; // ~0.25
-  const HALF = cellSize / 2;
-
+const analyzeGlobalAquifer = async ({aquiferId}) => {
   // Load boundary layer + zoom
   await boundaryLayer.load();
 
@@ -145,28 +141,45 @@ const main = async ({aquiferId}) => {
   if (!fs.features.length) throw new Error("No features found");
   const boundaryGeom = fs.features[0].geometry;
 
-  // ---- Candidate cell centers limited by boundary extent ----
-  const filteredLats = lat.data.filter((y) => y >= boundaryExtent.extent.ymin - 2 * cellSize && y <= boundaryExtent.extent.ymax + 2 * cellSize);
-  const filteredLons = lon.data.filter((x) => x >= boundaryExtent.extent.xmin - 2 * cellSize && x <= boundaryExtent.extent.xmax + 2 * cellSize);
+  await main({polygon: boundaryGeom, zoomPromise});
+}
 
-  // ---- Zarr reads (subset to bbox) ----
+const analyzeDrawnPolygon = async ({polygon}) => {
+  const zoomPromise = arcgisMap.view.goTo(polygon.extent);
+  // convert the drawn polygon to WGS84 if needed
+  if (polygon.spatialReference.wkid !== 4326) {
+    await shapePreservingProjectOperator.load()
+    polygon = shapePreservingProjectOperator.execute(polygon, SpatialReference.WGS84);
+  }
+  await main({polygon, zoomPromise});
+}
+
+const main = async ({polygon, zoomPromise}) => {
+  const {lat, lon} = await coordsPromise;
+  await map.when();
+  await view.when();
+  const cellSize = lat.data[1] - lat.data[0]; // ~0.25
+  const HALF = cellSize / 2;
+
+  // ---- Identify cells in the bounding box of the polygon to read zarr values for and start the async reads which we can wait for later
+  const filteredLats = lat.data.filter((y) => y >= polygon.extent.ymin - 2 * cellSize && y <= polygon.extent.ymax + 2 * cellSize);
+  const filteredLons = lon.data.filter((x) => x >= polygon.extent.xmin - 2 * cellSize && x <= polygon.extent.xmax + 2 * cellSize);
   const yStart = lat.data.indexOf(filteredLats[0]);
   const yStop = lat.data.indexOf(filteredLats[filteredLats.length - 1]) + 1;
   const xStart = lon.data.indexOf(filteredLons[0]);
   const xStop = lon.data.indexOf(filteredLons[filteredLons.length - 1]) + 1;
-
   let lweValues = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
   let uncValues = get(uncNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
 
-  // ---- Find selected cells (>50% contained) ----
-  intersectionOperator.accelerateGeometry(boundaryGeom);
+  // ---- Find the overlapping areas of the cells with the polygon ----
+  intersectionOperator.accelerateGeometry(polygon);
   const intersectingCells = [];
   for (const y of filteredLats) {
     for (const x of filteredLons) {
       const cell = cellPolygonFromCenter({xCenter: x, yCenter: y, halfWidth: HALF});
       const cellArea = geometryEngine.geodesicArea(cell);
 
-      const intersectsGeom = intersectionOperator.execute(boundaryGeom, cell);
+      const intersectsGeom = intersectionOperator.execute(polygon, cell);
       const intersectArea = intersectsGeom ? geometryEngine.geodesicArea(intersectsGeom) : 0;
       const frac = intersectArea / cellArea;
 
@@ -174,44 +187,47 @@ const main = async ({aquiferId}) => {
     }
   }
 
-  // ---- Resolve zarr reads ----
+  // ---- Resolve zarr reads and compute averages
   lweValues = await lweValues;
   uncValues = await uncValues;
   const lweMeanTimeSeries = meanIgnoringNaN(lweValues.data, lweValues.shape, lweValues.stride);
   const uncMeanTimeSeries = meanIgnoringNaN(uncValues.data, uncValues.shape, uncValues.stride);
 
-  // ---- Plotly time series ----
-  const trace1 = {
-    x: timeDates,
-    y: Array.from(lweMeanTimeSeries),
-    mode: "lines",
-    name: "LWE Anomaly",
-    line: {color: "black"}
-  };
-
-  const trace2 = {
-    x: timeDates.concat(timeDates.slice().reverse()),
-    y: Array.from(lweMeanTimeSeries).map((v, i) => v + uncMeanTimeSeries[i])
-      .concat(Array.from(lweMeanTimeSeries).map((v, i) => v - uncMeanTimeSeries[i]).reverse()),
-    fill: "toself",
-    fillcolor: "rgba(0,197,255,0.45)",
-    line: {color: "rgba(255,255,255,0)"},
-    name: "Uncertainty Range",
-    showlegend: true
-  };
-
+  // create a plotly plot
   Plotly.newPlot(
     "timeseries-plot",
-    [trace2, trace1],
+    // traces
+    [
+      {
+        x: timeDates.concat(timeDates.slice().reverse()),
+        y: Array.from(lweMeanTimeSeries).map((v, i) => v + uncMeanTimeSeries[i])
+          .concat(Array.from(lweMeanTimeSeries).map((v, i) => v - uncMeanTimeSeries[i]).reverse()),
+        fill: "toself",
+        fillcolor: "rgba(0,197,255,0.45)",
+        line: {color: "rgba(255,255,255,0)"},
+        name: "Uncertainty Range",
+        showlegend: true
+      },
+      {
+        x: timeDates,
+        y: Array.from(lweMeanTimeSeries),
+        mode: "lines",
+        name: "LWE Anomaly",
+        line: {color: "black"}
+      }
+    ],
+    // layout
     {
       title: "Mean LWE Anomaly Time Series with Uncertainty",
       xaxis: {title: "Time"},
       yaxis: {title: "LWE Anomaly (cm)"},
       legend: {orientation: "v"},
     },
+    // config
     {
       responsive: true,
-    });
+    }
+  );
 
   const cellSource = intersectingCells
     .map(({lon, lat, frac, cell, intersects}, idx) => {
@@ -350,26 +366,19 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
   view = arcgisMap.view;
   await map.when();
   await view.when()
-  map.add(boundaryLayer);
+  map.addMany([boundaryLayer])
 
-  view.popup.dockEnabled = false;
-  view.popup.dockOptions = {
-    buttonEnabled: false,
-    breakpoint: false
-  };
-
-
-  // when an action is triggered from the popups
-  reactiveUtils.on(
-    () => view.popup,
-    "trigger-action",
-    (event) => {
-      if (event.action.id === "select-aquifer") {
-        main({aquiferId: view.popup.selectedFeature.attributes.id});
-        view.popup.close();
-      }
-    },
-  );
+  sketchTool.availableCreateTools = ["polygon"];
+  sketchTool.layer.title = "User drawn polygons";
+  sketchTool.addEventListener("arcgisCreate", (e) => {
+    if (e.detail.state === "start") {
+      sketchTool.layer.removeAll();
+    }
+    if (e.detail.state === "complete") {
+      const polygon = e.detail.graphic.geometry;
+      analyzeDrawnPolygon({polygon});
+    }
+  })
 
   arcgisLayerList.listItemCreatedFunction = (event) => {
     const item = event.item;
