@@ -240,10 +240,11 @@ const main = async ({polygon, zoomPromise}) => {
       createLinePlot(twsaMeanTimeSeries, "#8c510a", "TWSA"),
     ],
     {
-      title: "Mean Anomaly Time Series with Uncertainty",
-      xaxis: {title: "Time"},
-      yaxis: {title: "Anomaly (cm)"},
+      title: {text: "Mean Anomaly Time Series with Uncertainty", font: {size: 14, color: "#333"}},
+      xaxis: {title: {text: "Time", font: {size: 12, color: "#333"}}, automargin: true},
+      yaxis: {title: {text: "Anomaly (cm)", font: {size: 12, color: "#333"}}, automargin: true},
       legend: {orientation: "h", y: -0.2},
+      margin: {t: 40, b: 60, l: 60, r: 20},
     },
     {
       responsive: true,
