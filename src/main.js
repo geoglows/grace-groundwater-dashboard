@@ -91,11 +91,6 @@ const boundaryLayer = new GeoJSONLayer({
   }
 });
 
-// lets start a global group layer which we add and remove aquifer cell layers to
-const anomalyLayersGroup = new GroupLayer({
-  title: "Water Anomaly Layers",
-  visible: true,
-})
 
 function meanIgnoringNaN(data, shape, stride) {
   const [T, Y, X] = shape;
@@ -168,11 +163,13 @@ const main = async ({polygon, zoomPromise}) => {
   const yStop = lat.data.indexOf(filteredLats[filteredLats.length - 1]) + 1;
   const xStart = lon.data.indexOf(filteredLons[0]);
   const xStop = lon.data.indexOf(filteredLons[filteredLons.length - 1]) + 1;
-  // for placeholder, lets duplicate gwaValues 3 times to simulate the additional layers i need to add. We'll add logic to get those values later.
+  // Fetch values and uncertainties for all 3 variables (placeholder: using same data source for now)
   let gwaValues = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
   let smaValues = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
-  let twsa = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
-  let uncValues = get(uncNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
+  let twsaValues = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
+  let gwaUncValues = get(uncNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
+  let smaUncValues = get(uncNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
+  let twsaUncValues = get(uncNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
 
   // ---- Find the overlapping areas of the cells with the polygon ----
   intersectionOperator.accelerateGeometry(polygon);
@@ -193,106 +190,168 @@ const main = async ({polygon, zoomPromise}) => {
   // ---- Resolve zarr reads and compute averages
   gwaValues = await gwaValues;
   smaValues = await smaValues;
-  twsa = await twsa;
-  uncValues = await uncValues;
-  const lweMeanTimeSeries = meanIgnoringNaN(gwaValues.data, gwaValues.shape, gwaValues.stride);
-  const uncMeanTimeSeries = meanIgnoringNaN(uncValues.data, uncValues.shape, uncValues.stride);
+  twsaValues = await twsaValues;
+  gwaUncValues = await gwaUncValues;
+  smaUncValues = await smaUncValues;
+  twsaUncValues = await twsaUncValues;
 
-  // create a plotly plot
+  const gwaMeanTimeSeries = meanIgnoringNaN(gwaValues.data, gwaValues.shape, gwaValues.stride);
+  const smaMeanTimeSeries = meanIgnoringNaN(smaValues.data, smaValues.shape, smaValues.stride);
+  const twsaMeanTimeSeries = meanIgnoringNaN(twsaValues.data, twsaValues.shape, twsaValues.stride);
+  const gwaUncMeanTimeSeries = meanIgnoringNaN(gwaUncValues.data, gwaUncValues.shape, gwaUncValues.stride);
+  const smaUncMeanTimeSeries = meanIgnoringNaN(smaUncValues.data, smaUncValues.shape, smaUncValues.stride);
+  const twsaUncMeanTimeSeries = meanIgnoringNaN(twsaUncValues.data, twsaUncValues.shape, twsaUncValues.stride);
+
+  // Helper to create uncertainty band trace
+  const createUncertaintyBand = (meanSeries, uncSeries, color, name) => ({
+    x: timeDates.concat(timeDates.slice().reverse()),
+    y: Array.from(meanSeries).map((v, i) => v + uncSeries[i])
+      .concat(Array.from(meanSeries).map((v, i) => v - uncSeries[i]).reverse()),
+    fill: "toself",
+    fillcolor: color,
+    line: {color: "rgba(255,255,255,0)"},
+    name: `${name} Uncertainty`,
+    showlegend: false,
+    legendgroup: name
+  });
+
+  // Helper to create line trace
+  const createLinePlot = (meanSeries, color, name) => ({
+    x: timeDates,
+    y: Array.from(meanSeries),
+    mode: "lines",
+    name,
+    line: {color},
+    legendgroup: name
+  });
+
+  // Create plotly plot with all 3 time series and their uncertainty bands
   Plotly.newPlot(
     "timeseries-plot",
-    // traces
     [
-      {
-        x: timeDates.concat(timeDates.slice().reverse()),
-        y: Array.from(lweMeanTimeSeries).map((v, i) => v + uncMeanTimeSeries[i])
-          .concat(Array.from(lweMeanTimeSeries).map((v, i) => v - uncMeanTimeSeries[i]).reverse()),
-        fill: "toself",
-        fillcolor: "rgba(0,197,255,0.45)",
-        line: {color: "rgba(255,255,255,0)"},
-        name: "Uncertainty Range",
-        showlegend: true
-      },
-      {
-        x: timeDates,
-        y: Array.from(lweMeanTimeSeries),
-        mode: "lines",
-        name: "LWE Anomaly",
-        line: {color: "black"}
-      }
+      // GWA uncertainty band and line
+      createUncertaintyBand(gwaMeanTimeSeries, gwaUncMeanTimeSeries, "rgba(28,110,236,0.25)", "GWA"),
+      createLinePlot(gwaMeanTimeSeries, "#1c6eec", "GWA"),
+      // SMA uncertainty band and line
+      createUncertaintyBand(smaMeanTimeSeries, smaUncMeanTimeSeries, "rgba(215,48,39,0.25)", "SMA"),
+      createLinePlot(smaMeanTimeSeries, "#d73027", "SMA"),
+      // TWSA uncertainty band and line
+      createUncertaintyBand(twsaMeanTimeSeries, twsaUncMeanTimeSeries, "rgba(140,81,10,0.25)", "TWSA"),
+      createLinePlot(twsaMeanTimeSeries, "#8c510a", "TWSA"),
     ],
-    // layout
     {
-      title: "Mean LWE Anomaly Time Series with Uncertainty",
+      title: "Mean Anomaly Time Series with Uncertainty",
       xaxis: {title: "Time"},
-      yaxis: {title: "LWE Anomaly (cm)"},
-      legend: {orientation: "v"},
+      yaxis: {title: "Anomaly (cm)"},
+      legend: {orientation: "h", y: -0.2},
     },
-    // config
     {
       responsive: true,
     }
   );
 
+  // ---- Create single cell source with all 3 value fields ----
   const cellSource = intersectingCells
     .map(({lon, lat, frac, cell, intersects}, idx) => {
       if (!intersects || frac < 0.35) return null;
       return new Graphic({
-        geometry: cell, // polygon
+        geometry: cell,
         attributes: {
-          oid: idx,      // object id
+          oid: idx,
           idx,
           lon,
           lat,
           frac,
-          value: 0
+          gwaValue: 0,
+          smaValue: 0,
+          twsaValue: 0
         }
       });
     })
     .filter(Boolean);
 
-  const selectedCellsLayer = new FeatureLayer({
-    title: "GW Anomaly Cells",
-    source: cellSource,
-    objectIdField: "oid",
-    fields: [
-      {name: "oid", type: "oid"},
-      {name: "idx", type: "integer"},
-      {name: "lon", type: "double"},
-      {name: "lat", type: "double"},
-      {name: "frac", type: "double"},
-      {name: "value", type: "double"}
-    ],
-    geometryType: "polygon",
-    spatialReference: SpatialReference.WGS84,
-    renderer: {
-      type: "simple",
-      symbol: {
-        type: "simple-fill",
-        outline: {color: [0, 0, 0, 1], width: 0.5}
-      },
-      visualVariables: [{
-        type: "color",
-        field: "value",
-        stops: [
-          {value: -30, color: "#ff004e", label: "-30"},
-          {value: 0, color: "#ffffff", label: "0"},
-          {value: 30, color: "#1c6eec", label: "30"}
-        ]
-      }]
-    }
+  const cellFields = [
+    {name: "oid", type: "oid"},
+    {name: "idx", type: "integer"},
+    {name: "lon", type: "double"},
+    {name: "lat", type: "double"},
+    {name: "frac", type: "double"},
+    {name: "gwaValue", type: "double"},
+    {name: "smaValue", type: "double"},
+    {name: "twsaValue", type: "double"}
+  ];
+
+  // Create renderer for a given field (same color bar for all)
+  const createRenderer = (field) => ({
+    type: "simple",
+    symbol: {
+      type: "simple-fill",
+      outline: {color: [0, 0, 0, 1], width: 0.5}
+    },
+    visualVariables: [{
+      type: "color",
+      field,
+      stops: [
+        {value: -30, color: "#ff004e", label: "-30 cm"},
+        {value: 0, color: "#ffffff", label: "0"},
+        {value: 30, color: "#1c6eec", label: "30 cm"}
+      ]
+    }]
   });
 
-  const possiblyExistingLayer = arcgisMap.map.layers.find(l => l.title === "GW Anomaly Cells");
-  if (possiblyExistingLayer) arcgisMap.map.layers.remove(possiblyExistingLayer);
-  await zoomPromise; // ensure view is zoomed before plotting
-  arcgisMap.map.layers.add(selectedCellsLayer, 0); // add to bottom of stack
+  // 3 FeatureLayers sharing the same source, each with renderer for different field
+  const gwaLayer = new FeatureLayer({
+    title: "Groundwater Anomaly (GWA)",
+    source: cellSource,
+    objectIdField: "oid",
+    fields: cellFields,
+    geometryType: "polygon",
+    spatialReference: SpatialReference.WGS84,
+    renderer: createRenderer("gwaValue"),
+    visible: true
+  });
 
-// ---- precompute lookup from feature idx -> oid (same in your case, but keep explicit) ----
+  const smaLayer = new FeatureLayer({
+    title: "Soil Moisture Anomaly (SMA)",
+    source: cellSource,
+    objectIdField: "oid",
+    fields: cellFields,
+    geometryType: "polygon",
+    spatialReference: SpatialReference.WGS84,
+    renderer: createRenderer("smaValue"),
+    visible: false
+  });
+
+  const twsaLayer = new FeatureLayer({
+    title: "Total Water Storage Anomaly (TWSA)",
+    source: cellSource,
+    objectIdField: "oid",
+    fields: cellFields,
+    geometryType: "polygon",
+    spatialReference: SpatialReference.WGS84,
+    renderer: createRenderer("twsaValue"),
+    visible: false
+  });
+
+  // Group layer with exclusive visibility (only one visible at a time)
+  const anomalyCellsGroup = new GroupLayer({
+    title: "Anomaly Cells",
+    visibilityMode: "exclusive",
+    layers: [gwaLayer, smaLayer, twsaLayer],
+    visible: true
+  });
+
+  // Remove existing group if present and add new one
+  const possiblyExistingGroup = arcgisMap.map.layers.find(l => l.title === "Anomaly Cells");
+  if (possiblyExistingGroup) arcgisMap.map.layers.remove(possiblyExistingGroup);
+  await zoomPromise;
+  arcgisMap.map.layers.add(anomalyCellsGroup, 0);
+
+  // ---- precompute lookup from feature idx -> oid ----
   const oids = cellSource.map(g => g.attributes.oid);
   const idxs = cellSource.map(g => g.attributes.idx);
 
-// ---- make updates serial so slider scrubbing doesn't overlap edits ----
+  // ---- make updates serial so slider scrubbing doesn't overlap edits ----
   let editsInFlight = Promise.resolve();
 
   const updateMapToTimeStep = (timeStep) => {
@@ -301,36 +360,38 @@ const main = async ({polygon, zoomPromise}) => {
       const nLat = gwaValues.shape[1];
       const base = timeStep * nLat * nLon;
 
-      // update ONLY attributes via applyEdits (no geometry recompute)
+      // Build update array with all 3 values for each cell
       const updateFeatures = new Array(cellSource.length);
       for (let i = 0; i < cellSource.length; i++) {
         const idx = idxs[i];
         updateFeatures[i] = new Graphic({
           attributes: {
             oid: oids[i],
-            value: gwaValues.data[base + idx]
+            gwaValue: gwaValues.data[base + idx],
+            smaValue: smaValues.data[base + idx],
+            twsaValue: twsaValues.data[base + idx]
           }
         });
       }
 
-      await selectedCellsLayer.applyEdits({updateFeatures});
+      // Update all layers (they share the same data structure)
+      await Promise.all([
+        gwaLayer.applyEdits({updateFeatures}),
+        smaLayer.applyEdits({updateFeatures}),
+        twsaLayer.applyEdits({updateFeatures})
+      ]);
 
-      Plotly.relayout("timeseries-plot",
-        {
-          shapes: [{
-            type: "line",
-            x0: timeDates[timeStep],
-            x1: timeDates[timeStep],
-            y0: 0,
-            y1: 1,
-            yref: "paper",
-            line: {color: "red", width: 2, dash: "dot"}
-          }],
-        },
-        {
-          title: `Mean LWE Anomaly Time Series`,
-        }
-      );
+      Plotly.relayout("timeseries-plot", {
+        shapes: [{
+          type: "line",
+          x0: timeDates[timeStep],
+          x1: timeDates[timeStep],
+          y0: 0,
+          y1: 1,
+          yref: "paper",
+          line: {color: "red", width: 2, dash: "dot"}
+        }]
+      });
     }).catch(console.error);
   };
 
@@ -367,7 +428,7 @@ const resetLayers = () => {
   arcgisMap.view.goTo(boundaryLayer.fullExtent);
   timeSlider.widget.stop();
   document.getElementById("timeseries-plot").innerHTML = appInstructions;
-  const possiblyExistingLayer = arcgisMap.map.layers.find(l => l.title === "GW Anomaly Cells");
+  const possiblyExistingLayer = arcgisMap.map.layers.find(l => l.title === "Anomaly Cells");
   if (possiblyExistingLayer) arcgisMap.map.layers.remove(possiblyExistingLayer);
 }
 
@@ -375,7 +436,6 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
   await arcgisMap.map.when();
   await arcgisMap.view.when()
   arcgisMap.map.add(boundaryLayer);
-  arcgisMap.map.add(anomalyLayersGroup, 0); // at bottom of stack so boundaries are drawn on top
   boundaryLayer.load().then(() => arcgisMap.view.goTo(boundaryLayer.fullExtent))
 
   sketchTool.availableCreateTools = ["polygon"];
@@ -400,11 +460,13 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
           icon: "zoom-out-fixed"
         }
       ]];
-    } else if (item.layer.title === "GW Anomaly Cells") {
+    } else if (item.layer.title === "Anomaly Cells") {
+      // Expand group by default, make it collapsible
+      item.open = true;
       item.actionsSections = [[
         {
           title: "Zoom to Full Extent",
-          id: "full-extent-gwcells",
+          id: "full-extent-anomaly-cells",
           icon: "zoom-out-fixed"
         },
       ]];
@@ -414,10 +476,10 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
   arcgisLayerList.addEventListener("arcgisTriggerAction", (event) => {
     if (event.detail.action.id === "full-extent-aquifers") {
       arcgisMap.view.goTo(boundaryLayer.fullExtent);
-    } else if (event.detail.action.id === "full-extent-gwcells") {
-      const gwCellsLayer = arcgisMap.map.layers.find(l => l.title === "GW Anomaly Cells");
-      if (gwCellsLayer) {
-        arcgisMap.view.goTo(gwCellsLayer.fullExtent);
+    } else if (event.detail.action.id === "full-extent-anomaly-cells") {
+      const anomalyCellsLayer = arcgisMap.map.layers.find(l => l.title === "Anomaly Cells");
+      if (anomalyCellsLayer) {
+        arcgisMap.view.goTo(anomalyCellsLayer.fullExtent);
       }
     } else if (event.detail.action.id === "reset-selections") {
       resetLayers();

@@ -13,34 +13,36 @@
 </div>
 <div class="body">
   <arcgis-map item-id="a69f14ea2e784e019f4a4b6835ffd376" zoom="2" center="0,20" class="map-view">
+    <!-- Top-left: Navigation -->
     <arcgis-zoom slot="top-left"></arcgis-zoom>
-    <arcgis-layer-list slot="top-right"></arcgis-layer-list>
-    <arcgis-expand slot="top-right" title="Basemap Gallery">
+    <arcgis-locate slot="top-left" scale="5000"></arcgis-locate>
+    <arcgis-expand slot="top-left" title="Basemap Gallery">
       <arcgis-basemap-gallery></arcgis-basemap-gallery>
     </arcgis-expand>
-    <arcgis-locate slot="top-left" scale="5000"></arcgis-locate>
-    <arcgis-time-slider play-rate="1000" layout="auto" slot="bottom-right"></arcgis-time-slider>
-    <arcgis-expand slot="bottom-right" title="Drawing Controls">
-      <arcgis-sketch title="Draw Shapes"></arcgis-sketch>
-    </arcgis-expand>
-    <arcgis-expand slot="top-right" title="Legend">
+    <arcgis-expand slot="top-left" title="Legend">
       <arcgis-legend></arcgis-legend>
     </arcgis-expand>
+    <!-- Top-right: Config/Info -->
+    <arcgis-sketch slot="top-right" title="Drawing Tools"></arcgis-sketch>
+    <arcgis-layer-list slot="top-right"></arcgis-layer-list>
+    <!-- Bottom-left: Reference -->
     <calcite-action slot="bottom-left" icon="refresh" id="refresh-layers"></calcite-action>
     <arcgis-scale-bar slot="bottom-left" bar-style="line" unit="dual"></arcgis-scale-bar>
+    <!-- Bottom-right: Primary tool -->
+    <arcgis-time-slider slot="bottom-right" play-rate="1000" layout="auto"></arcgis-time-slider>
   </arcgis-map>
   <div id="timeseries-plot" class="chart-container">
-    <div style="padding: 20px; font-size: 16px;">
-      <p>Welcome to the Groundwater Storage Anomaly Explorer!</p>
-      <p>To get started, either:</p>
-      <ul>
-        <li>Click on an aquifer boundary on the map to analyze its groundwater storage anomaly over time.</li>
-        <li>Use the polygon drawing tool (pencil icon on the top right of the map) to draw a polygon.</li>
-      </ul>
-      <p>Once you've made a selection, the time series plot will update to show the mean groundwater storage anomaly for your chosen area.</p>
-      <p>Use the time slider below the map to explore changes over time.</p>
-      <p>To reset the map and make a new selection, use the refresh icon on the rop right of the map.</p>
-    </div>
+  <div style="padding: 20px; font-size: 16px;">
+    <p>Welcome to the Groundwater Storage Anomaly Explorer!</p>
+    <p>To get started, either:</p>
+    <ul>
+      <li>Click on an aquifer boundary on the map to analyze its groundwater storage anomaly over time.</li>
+      <li>Use the polygon drawing tool (pencil icon on the top right of the map) to draw a polygon.</li>
+    </ul>
+    <p>Once you've made a selection, the time series plot will update to show the mean groundwater storage anomaly for your chosen area.</p>
+    <p>Use the time slider below the map to explore changes over time.</p>
+    <p>To reset the map and make a new selection, use the refresh icon on the rop right of the map.</p>
+  </div>
   </div>
 </div>
 

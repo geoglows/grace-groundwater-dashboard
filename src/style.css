@@ -31,17 +31,16 @@ body {
     width: 100%;
     position: absolute;
     top: var(--nav-height);
+    display: flex;
     flex-direction: column;
 }
 
 arcgis-map {
     height: 65%;
     width: 100%;
-    flex: 1 1 auto;
 }
 
 .chart-container {
     height: 35%;
     width: 100%;
-    flex: 1 1 auto;
 }
