@@ -301,7 +301,7 @@ const main = async ({polygon, zoomPromise}) => {
 
   // 3 FeatureLayers sharing the same source, each with renderer for different field
   const gwaLayer = new FeatureLayer({
-    title: "Groundwater Anomaly (GWA)",
+    title: "Groundwater",
     source: cellSource,
     objectIdField: "oid",
     fields: cellFields,
@@ -312,7 +312,7 @@ const main = async ({polygon, zoomPromise}) => {
   });
 
   const smaLayer = new FeatureLayer({
-    title: "Soil Moisture Anomaly (SMA)",
+    title: "Soil Moisture",
     source: cellSource,
     objectIdField: "oid",
     fields: cellFields,
@@ -323,7 +323,7 @@ const main = async ({polygon, zoomPromise}) => {
   });
 
   const twsaLayer = new FeatureLayer({
-    title: "Total Water Storage Anomaly (TWSA)",
+    title: "Total Water Storage",
     source: cellSource,
     objectIdField: "oid",
     fields: cellFields,
@@ -460,8 +460,7 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
           icon: "zoom-out-fixed"
         }
       ]];
-    } else if (item.layer.title === "Anomaly Cells") {
-      // Expand group by default, make it collapsible
+    } else if (item.layer.title === "Anomaly Maps") {
       item.open = true;
       item.actionsSections = [[
         {
