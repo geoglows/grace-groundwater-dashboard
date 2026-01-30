@@ -14,20 +14,20 @@
 <div class="body">
   <arcgis-map item-id="a69f14ea2e784e019f4a4b6835ffd376" zoom="2" center="0,20" class="map-view">
     <arcgis-zoom slot="top-left"></arcgis-zoom>
-    <arcgis-expand slot="top-left" title="Basemap Gallery">
+    <arcgis-layer-list slot="top-right"></arcgis-layer-list>
+    <arcgis-expand slot="top-right" title="Basemap Gallery">
       <arcgis-basemap-gallery></arcgis-basemap-gallery>
     </arcgis-expand>
     <arcgis-locate slot="top-left" scale="5000"></arcgis-locate>
-    <arcgis-layer-list slot="top-right"></arcgis-layer-list>
-    <arcgis-time-slider play-rate="1000" layout="auto" slot="top-right"></arcgis-time-slider>
-    <arcgis-expand slot="top-right" title="Drawing Controls">
+    <arcgis-time-slider play-rate="1000" layout="auto" slot="bottom-right"></arcgis-time-slider>
+    <arcgis-expand slot="bottom-right" title="Drawing Controls">
       <arcgis-sketch title="Draw Shapes"></arcgis-sketch>
     </arcgis-expand>
     <arcgis-expand slot="top-right" title="Legend">
       <arcgis-legend></arcgis-legend>
     </arcgis-expand>
-    <arcgis-scale-bar slot="bottom-right" bar-style="line" unit="dual"></arcgis-scale-bar>
     <calcite-action slot="bottom-left" icon="refresh" id="refresh-layers"></calcite-action>
+    <arcgis-scale-bar slot="bottom-left" bar-style="line" unit="dual"></arcgis-scale-bar>
   </arcgis-map>
   <div id="timeseries-plot" class="chart-container">
     <div style="padding: 20px; font-size: 16px;">

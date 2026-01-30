@@ -1,3 +1,6 @@
+import "./style.css";
+import "./modal.css"
+
 import "@arcgis/core/assets/esri/themes/light/main.css";
 import "@arcgis/map-components/components/arcgis-map";
 import "@arcgis/map-components/components/arcgis-zoom";
@@ -9,8 +12,8 @@ import "@arcgis/map-components/components/arcgis-basemap-gallery";
 import "@arcgis/map-components/components/arcgis-legend";
 import "@arcgis/map-components/components/arcgis-sketch";
 import "@arcgis/map-components/components/arcgis-time-slider";
-
 import GeoJSONLayer from "@arcgis/core/layers/GeoJSONLayer.js";
+import GroupLayer from "@arcgis/core/layers/GroupLayer.js";
 import FeatureLayer from "@arcgis/core/layers/FeatureLayer.js";
 import Graphic from "@arcgis/core/Graphic.js";
 import SpatialReference from "@arcgis/core/geometry/SpatialReference.js";
@@ -19,21 +22,15 @@ import * as shapePreservingProjectOperator from "@arcgis/core/geometry/operators
 import * as geometryEngine from "@arcgis/core/geometry/geometryEngine.js";
 import * as reactiveUtils from "@arcgis/core/core/reactiveUtils.js";
 
+import {FetchStore, get, open} from "zarrita";
+
 import {cellPolygonFromCenter} from "./cells.js";
+import {getOrFetchCoords} from "./db.js";
 
 import Plotly from "plotly.js/lib/core";
 import Scatter from "plotly.js/lib/scatter";
-
-import {FetchStore, get, open} from "zarrita";
-
-import {getOrFetchCoords} from "./db.js";
-
-import "./style.css";
-import "./modal.css"
-
 Plotly.register([Scatter]);
 
-// const zarrUrl = "https://d2grb3c773p1iz.cloudfront.net/groundwater/GRC_gw_anomaly.zarr3";
 const zarrUrl = "https://d2grb3c773p1iz.cloudfront.net/groundwater/grace025gwanomaly.zarr";
 
 const arcgisMap = document.querySelector("arcgis-map");
@@ -93,6 +90,12 @@ const boundaryLayer = new GeoJSONLayer({
     }
   }
 });
+
+// lets start a global group layer which we add and remove aquifer cell layers to
+const anomalyLayersGroup = new GroupLayer({
+  title: "Water Anomaly Layers",
+  visible: true,
+})
 
 function meanIgnoringNaN(data, shape, stride) {
   const [T, Y, X] = shape;
@@ -165,7 +168,10 @@ const main = async ({polygon, zoomPromise}) => {
   const yStop = lat.data.indexOf(filteredLats[filteredLats.length - 1]) + 1;
   const xStart = lon.data.indexOf(filteredLons[0]);
   const xStop = lon.data.indexOf(filteredLons[filteredLons.length - 1]) + 1;
-  let lweValues = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
+  // for placeholder, lets duplicate gwaValues 3 times to simulate the additional layers i need to add. We'll add logic to get those values later.
+  let gwaValues = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
+  let smaValues = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
+  let twsa = get(lweNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
   let uncValues = get(uncNode, [null, {start: yStart, stop: yStop}, {start: xStart, stop: xStop}]);
 
   // ---- Find the overlapping areas of the cells with the polygon ----
@@ -185,9 +191,11 @@ const main = async ({polygon, zoomPromise}) => {
   }
 
   // ---- Resolve zarr reads and compute averages
-  lweValues = await lweValues;
+  gwaValues = await gwaValues;
+  smaValues = await smaValues;
+  twsa = await twsa;
   uncValues = await uncValues;
-  const lweMeanTimeSeries = meanIgnoringNaN(lweValues.data, lweValues.shape, lweValues.stride);
+  const lweMeanTimeSeries = meanIgnoringNaN(gwaValues.data, gwaValues.shape, gwaValues.stride);
   const uncMeanTimeSeries = meanIgnoringNaN(uncValues.data, uncValues.shape, uncValues.stride);
 
   // create a plotly plot
@@ -289,8 +297,8 @@ const main = async ({polygon, zoomPromise}) => {
 
   const updateMapToTimeStep = (timeStep) => {
     editsInFlight = editsInFlight.then(async () => {
-      const nLon = lweValues.shape[2];
-      const nLat = lweValues.shape[1];
+      const nLon = gwaValues.shape[2];
+      const nLat = gwaValues.shape[1];
       const base = timeStep * nLat * nLon;
 
       // update ONLY attributes via applyEdits (no geometry recompute)
@@ -300,7 +308,7 @@ const main = async ({polygon, zoomPromise}) => {
         updateFeatures[i] = new Graphic({
           attributes: {
             oid: oids[i],
-            value: lweValues.data[base + idx]
+            value: gwaValues.data[base + idx]
           }
         });
       }
@@ -366,7 +374,9 @@ const resetLayers = () => {
 arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
   await arcgisMap.map.when();
   await arcgisMap.view.when()
-  arcgisMap.map.addMany([boundaryLayer])
+  arcgisMap.map.add(boundaryLayer);
+  arcgisMap.map.add(anomalyLayersGroup, 0); // at bottom of stack so boundaries are drawn on top
+  boundaryLayer.load().then(() => arcgisMap.view.goTo(boundaryLayer.fullExtent))
 
   sketchTool.availableCreateTools = ["polygon"];
   sketchTool.layer.title = "User drawn polygons";
