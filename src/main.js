@@ -24,12 +24,15 @@ import * as reactiveUtils from "@arcgis/core/core/reactiveUtils.js";
 
 import {FetchStore, get, open} from "zarrita";
 
-import {cellPolygonFromCenter} from "./cells.js";
-import {getOrFetchCoords} from "./db.js";
-
 import Plotly from "plotly.js/lib/core";
 import Scatter from "plotly.js/lib/scatter";
+
+import {cellPolygonFromCenter} from "./cells.js";
+import {getOrFetchCoords} from "./db.js";
+import {createLinePlot, createUncertaintyBand, meanIgnoringNaN} from "./helpers.js";
+
 Plotly.register([Scatter]);
+
 
 const zarrUrl = "https://d2grb3c773p1iz.cloudfront.net/groundwater/grace025gwanomaly.zarr";
 
@@ -91,31 +94,6 @@ const boundaryLayer = new GeoJSONLayer({
   }
 });
 
-
-function meanIgnoringNaN(data, shape, stride) {
-  const [T, Y, X] = shape;
-  const [sT, sY, sX] = stride;
-
-  const result = new Float64Array(T);
-  for (let t = 0; t < T; t++) {
-    let sum = 0;
-    let count = 0;
-    const tOffset = t * sT;
-    for (let y = 0; y < Y; y++) {
-      const yOffset = tOffset + y * sY;
-      for (let x = 0; x < X; x++) {
-        const v = data[yOffset + x * sX];
-        if (!Number.isNaN(v)) {
-          sum += v;
-          count++;
-        }
-      }
-    }
-    result[t] = count > 0 ? sum / count : NaN;
-  }
-  return result;
-}
-
 const analyzeGlobalAquifer = async ({aquiferId}) => {
   // Load boundary layer + zoom
   await boundaryLayer.load();
@@ -140,12 +118,11 @@ const analyzeGlobalAquifer = async ({aquiferId}) => {
 }
 
 const analyzeDrawnPolygon = async ({polygon}) => {
-  const zoomPromise = arcgisMap.view.goTo(polygon.extent);
-  // convert the drawn polygon to WGS84 if needed
   if (polygon.spatialReference.wkid !== 4326) {
     await shapePreservingProjectOperator.load()
     polygon = shapePreservingProjectOperator.execute(polygon, SpatialReference.WGS84);
   }
+  const zoomPromise = arcgisMap.view.goTo(polygon.extent);
   await main({polygon, zoomPromise});
 }
 
@@ -203,41 +180,19 @@ const main = async ({polygon, zoomPromise}) => {
   const twsaUncMeanTimeSeries = meanIgnoringNaN(twsaUncValues.data, twsaUncValues.shape, twsaUncValues.stride);
 
   // Helper to create uncertainty band trace
-  const createUncertaintyBand = (meanSeries, uncSeries, color, name) => ({
-    x: timeDates.concat(timeDates.slice().reverse()),
-    y: Array.from(meanSeries).map((v, i) => v + uncSeries[i])
-      .concat(Array.from(meanSeries).map((v, i) => v - uncSeries[i]).reverse()),
-    fill: "toself",
-    fillcolor: color,
-    line: {color: "rgba(255,255,255,0)"},
-    name: `${name} Uncertainty`,
-    showlegend: false,
-    legendgroup: name
-  });
-
-  // Helper to create line trace
-  const createLinePlot = (meanSeries, color, name) => ({
-    x: timeDates,
-    y: Array.from(meanSeries),
-    mode: "lines",
-    name,
-    line: {color},
-    legendgroup: name
-  });
-
   // Create plotly plot with all 3 time series and their uncertainty bands
   Plotly.newPlot(
     "timeseries-plot",
     [
       // GWA uncertainty band and line
-      createUncertaintyBand(gwaMeanTimeSeries, gwaUncMeanTimeSeries, "rgba(28,110,236,0.25)", "GWA"),
-      createLinePlot(gwaMeanTimeSeries, "#1c6eec", "GWA"),
+      createUncertaintyBand({x: timeDates, yArray: gwaMeanTimeSeries, uncertaintyArray: gwaUncMeanTimeSeries, color: "rgba(28,110,236,0.25)", name: "GWA"}),
+      createLinePlot({x: timeDates, y: gwaMeanTimeSeries, color: "#1c6eec", name: "GWA"}),
       // SMA uncertainty band and line
-      createUncertaintyBand(smaMeanTimeSeries, smaUncMeanTimeSeries, "rgba(215,48,39,0.25)", "SMA"),
-      createLinePlot(smaMeanTimeSeries, "#d73027", "SMA"),
+      createUncertaintyBand({x: timeDates, yArray: smaMeanTimeSeries, uncertaintyArray: smaUncMeanTimeSeries, color: "rgba(215,48,39,0.25)", name: "SMA"}),
+      createLinePlot({x: timeDates, y: smaMeanTimeSeries, color: "#d73027", name: "SMA"}),
       // TWSA uncertainty band and line
-      createUncertaintyBand(twsaMeanTimeSeries, twsaUncMeanTimeSeries, "rgba(140,81,10,0.25)", "TWSA"),
-      createLinePlot(twsaMeanTimeSeries, "#8c510a", "TWSA"),
+      createUncertaintyBand({x: timeDates, yArray: twsaMeanTimeSeries, uncertaintyArray: twsaUncMeanTimeSeries, color: "rgba(140,81,10,0.25)", name: "TWSA"}),
+      createLinePlot({x: timeDates, y: twsaMeanTimeSeries, color: "#8c510a", name: "TWSA"}),
     ],
     {
       title: {text: "Mean Anomaly Time Series with Uncertainty", font: {size: 14, color: "#333"}},
@@ -489,5 +444,4 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
   document
     .querySelector("calcite-action#refresh-layers")
     .addEventListener("click", async () => resetLayers())
-
 });
