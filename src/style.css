@@ -17,6 +17,7 @@ body {
     height: var(--nav-height);
     display: flex;
     align-items: center;
+    justify-content: space-between;
     background-color: #00daff;
 }
 
@@ -24,6 +25,22 @@ body {
     margin: 0;
     padding: 0 20px;
     font-size: 24px;
+}
+
+.nav-bar .nav-buttons {
+    display: flex;
+    gap: 10px;
+    margin-right: 20px;
+}
+
+.nav-bar .icon-button {
+    background: rgba(255, 255, 255, 0.45);
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    display: flex;
+    align-items: center;
+    border-radius: 50%;
 }
 
 .body {
@@ -43,4 +60,15 @@ arcgis-map {
 .chart-container {
     height: 35%;
     width: 100%;
+}
+
+.centered-message {
+    height: 100%;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    font-weight: bold;
+    text-align: center;
 }

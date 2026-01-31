@@ -40,7 +40,8 @@ const arcgisMap = document.querySelector("arcgis-map");
 const arcgisLayerList = document.querySelector("arcgis-layer-list");
 const sketchTool = document.querySelector("arcgis-sketch");
 const timeSlider = document.querySelector("arcgis-time-slider");
-const appInstructions = document.getElementById("timeseries-plot").innerHTML;
+const timeseriesPlotDiv = document.getElementById("timeseries-plot");
+const appInstructions = timeseriesPlotDiv.innerHTML
 
 // todo: start these fetches all async in the same bit
 const coordsPromise = getOrFetchCoords({zarrUrl});
@@ -383,7 +384,7 @@ const resetLayers = () => {
   boundaryLayer.definitionExpression = "1=1"; // reset to none selected
   arcgisMap.view.goTo(boundaryLayer.fullExtent);
   timeSlider.widget.stop();
-  document.getElementById("timeseries-plot").innerHTML = appInstructions;
+  timeseriesPlotDiv.innerHTML = appInstructions;
   const possiblyExistingLayer = arcgisMap.map.layers.find(l => l.title === "Anomaly Cells");
   if (possiblyExistingLayer) arcgisMap.map.layers.remove(possiblyExistingLayer);
 }
@@ -443,5 +444,18 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
 
   document
     .querySelector("calcite-action#refresh-layers")
-    .addEventListener("click", async () => resetLayers())
+    .addEventListener("click", async () => resetLayers());
+
+  document
+    .querySelector("#info-button")
+    .addEventListener("click", () => {
+      document.getElementById("info-modal").classList.toggle("hidden");
+    });
+
+  // Close modal when clicking outside the content
+  document.getElementById("info-modal").addEventListener("click", (e) => {
+    if (e.target.id === "info-modal") {
+      e.target.classList.add("hidden");
+    }
+  });
 });

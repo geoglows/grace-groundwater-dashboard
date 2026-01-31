@@ -10,6 +10,11 @@
 <body>
 <div class="nav-bar">
   <h1>GEOGLOWS GRACE Groundwater Assessment</h1>
+  <div class="nav-buttons">
+    <button id="info-button" class="icon-button" title="Info">
+      <calcite-icon icon="information" scale="l"></calcite-icon>
+    </button>
+  </div>
 </div>
 <div class="body">
   <arcgis-map item-id="a69f14ea2e784e019f4a4b6835ffd376" zoom="2" center="0,20" class="map-view">
@@ -32,17 +37,7 @@
     <arcgis-time-slider slot="bottom-right" play-rate="1000" layout="auto"></arcgis-time-slider>
   </arcgis-map>
   <div id="timeseries-plot" class="chart-container">
-  <div style="padding: 20px; font-size: 16px;">
-    <p>Welcome to the Groundwater Storage Anomaly Explorer!</p>
-    <p>To get started, either:</p>
-    <ul>
-      <li>Click on an aquifer boundary on the map to analyze its groundwater storage anomaly over time.</li>
-      <li>Use the polygon drawing tool (pencil icon on the top right of the map) to draw a polygon.</li>
-    </ul>
-    <p>Once you've made a selection, the time series plot will update to show the mean groundwater storage anomaly for your chosen area.</p>
-    <p>Use the time slider below the map to explore changes over time.</p>
-    <p>To reset the map and make a new selection, use the refresh icon on the rop right of the map.</p>
-  </div>
+    <div class="centered-message">Select an aquifer or use the drawing tools to draw a polygon to get started.</div>
   </div>
 </div>
 
@@ -50,6 +45,16 @@
   <div class="modal-content">
     <h2>GEOGLOWS GRACE Groundwater Assessment Tool</h2>
     <p>This is an experimental implementation of an algorithm to identify changes in groundwater storage derived primarily from GRACE and GLDAS.</p>
+    <hr>
+    <p><strong>How to Use This Tool</strong></p>
+    <p>Select an area to analyze:</p>
+    <ul>
+      <li>Click on an aquifer boundary on the map, or</li>
+      <li>Use the drawing tools (top-right of map) to draw a custom region</li>
+    </ul>
+    <p>The time series plot will display the mean groundwater storage anomaly for your selection.</p>
+    <p>Use the time slider (bottom-right of map) to animate changes over time.</p>
+    <p>Click the refresh icon (bottom-left of map) to reset and make a new selection.</p>
     <button onclick="document.getElementById('info-modal').classList.toggle('hidden')">Close</button>
   </div>
 </div>
