@@ -55,6 +55,7 @@ body {
 arcgis-map {
     height: 65%;
     width: 100%;
+    border-bottom: 2px solid black;
 }
 
 .chart-container {

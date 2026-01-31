@@ -180,10 +180,10 @@ const main = async ({polygon, zoomPromise}) => {
   const smaUncMeanTimeSeries = meanIgnoringNaN(smaUncValues.data, smaUncValues.shape, smaUncValues.stride);
   const twsaUncMeanTimeSeries = meanIgnoringNaN(twsaUncValues.data, twsaUncValues.shape, twsaUncValues.stride);
 
-  // Helper to create uncertainty band trace
-  // Create plotly plot with all 3 time series and their uncertainty bands
+  // Generate the timeseries plot
+  timeseriesPlotDiv.innerHTML = "";
   Plotly.newPlot(
-    "timeseries-plot",
+    timeseriesPlotDiv,
     [
       // GWA uncertainty band and line
       createUncertaintyBand({x: timeDates, yArray: gwaMeanTimeSeries, uncertaintyArray: gwaUncMeanTimeSeries, color: "rgba(28,110,236,0.25)", name: "GWA"}),
@@ -200,7 +200,6 @@ const main = async ({polygon, zoomPromise}) => {
       xaxis: {title: {text: "Time", font: {size: 12, color: "#333"}}, automargin: true},
       yaxis: {title: {text: "Anomaly (cm)", font: {size: 12, color: "#333"}}, automargin: true},
       legend: {orientation: "h", y: -0.2},
-      margin: {t: 40, b: 60, l: 60, r: 20},
     },
     {
       responsive: true,
@@ -338,17 +337,21 @@ const main = async ({polygon, zoomPromise}) => {
         twsaLayer.applyEdits({updateFeatures})
       ]);
 
-      Plotly.relayout("timeseries-plot", {
-        shapes: [{
-          type: "line",
-          x0: timeDates[timeStep],
-          x1: timeDates[timeStep],
-          y0: 0,
-          y1: 1,
-          yref: "paper",
-          line: {color: "red", width: 2, dash: "dot"}
-        }]
-      });
+      Plotly
+        .relayout(
+          timeseriesPlotDiv,
+          {
+            shapes: [{
+              type: "line",
+              x0: timeDates[timeStep],
+              x1: timeDates[timeStep],
+              y0: 0,
+              y1: 1,
+              yref: "paper",
+              line: {color: "red", width: 2, dash: "dot"}
+            }]
+          }
+        );
     }).catch(console.error);
   };
 
@@ -417,7 +420,7 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
           icon: "zoom-out-fixed"
         }
       ]];
-    } else if (item.layer.title === "Anomaly Maps") {
+    } else if (item.layer.title === "Anomaly Cells") {
       item.open = true;
       item.actionsSections = [[
         {
@@ -433,9 +436,9 @@ arcgisMap.addEventListener("arcgisViewReadyChange", async () => {
     if (event.detail.action.id === "full-extent-aquifers") {
       arcgisMap.view.goTo(boundaryLayer.fullExtent);
     } else if (event.detail.action.id === "full-extent-anomaly-cells") {
-      const anomalyCellsLayer = arcgisMap.map.layers.find(l => l.title === "Anomaly Cells");
-      if (anomalyCellsLayer) {
-        arcgisMap.view.goTo(anomalyCellsLayer.fullExtent);
+      const anomalyCellsGroup = arcgisMap.map.layers.find(l => l.title === "Anomaly Cells");
+      if (anomalyCellsGroup?.layers?.length) {
+        arcgisMap.view.goTo(anomalyCellsGroup.layers.getItemAt(0).fullExtent);
       }
     } else if (event.detail.action.id === "reset-selections") {
       resetLayers();
