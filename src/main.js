@@ -22,7 +22,7 @@ import * as reactiveUtils from "@arcgis/core/core/reactiveUtils.js";
 import {get} from "zarrita";
 
 import {cellPolygonFromCenter} from "./cells.js";
-import {AQUIFERS_URL, ZARR_URL, ZARR_URL_HALF_DEGREE} from "./config.js";
+import {AQUIFERS_URL, MASCONS_URL, ZARR_URL, ZARR_URL_HALF_DEGREE} from "./config.js";
 import {clearCacheDB, getOrFetchCoords} from "./db.js";
 import {loadGlobalVariable} from "./globalFramesClient.js";
 import {createGlobalRenderer} from "./globalLayer.js";
@@ -103,6 +103,9 @@ const borderWidthValue = document.getElementById("border-width-value");
 const dynamicScaleToggle = document.getElementById("dynamic-scale-toggle");
 const dynamicScaleNote = document.getElementById("dynamic-scale-note");
 const legendToggle = document.getElementById("legend-toggle");
+const masconToggle = document.getElementById("mascon-toggle");
+const masconWidthSlider = document.getElementById("mascon-width");
+const masconWidthValue = document.getElementById("mascon-width-value");
 const halfDegreeToggle = document.getElementById("half-degree-toggle");
 const opacitySlider = document.getElementById("opacity-slider");
 const opacityValue = document.getElementById("opacity-value");
@@ -154,6 +157,9 @@ const syncSettingsControls = () => {
   borderWidthSlider.value = String(displayConfig.borderWidth);
   borderWidthValue.textContent = `${displayConfig.borderWidth}px`;
   legendToggle.checked = displayConfig.showLegend;
+  masconToggle.checked = displayConfig.showMascons;
+  masconWidthSlider.value = String(displayConfig.masconWidth);
+  masconWidthValue.textContent = `${displayConfig.masconWidth}px`;
   halfDegreeToggle.checked = displayConfig.halfDegreeCells;
   dynamicScaleToggle.checked = displayConfig.dynamicColorScale;
   // The fixed range is configurable, so the sentence explaining it has to be too.
@@ -333,6 +339,43 @@ const boundaryLayer = new GeoJSONLayer({
     }
   }
 });
+
+// The native 3 degree GRACE mascon footprints (data/mascon_boundaries.py). This
+// is an interpretation aid rather than data: every half degree cell inside one
+// outline came from the same independent mascon estimate, so a gradient within
+// a single outline is interpolation, not measurement.
+//
+// Outline only and popups off — a popupTemplate here would swallow the clicks
+// the aquifer layer and the cell handlers rely on, and the layer has nothing to
+// say that the outline itself does not.
+const masconRenderer = () => ({
+  type: "simple",
+  symbol: {
+    type: "simple-fill",
+    color: [255, 255, 255, 0],
+    outline: {color: [38, 38, 38, 0.75], width: displayConfig.masconWidth}
+  }
+});
+const masconLayer = new GeoJSONLayer({
+  title: "GRACE Mascon Footprints",
+  url: MASCONS_URL,
+  popupEnabled: false,
+  renderer: masconRenderer()
+});
+
+// Deferred rather than added at boot: a GeoJSONLayer fetches its whole source on
+// load() to infer fields, so adding it to the map is what costs the download.
+// Nobody who leaves the setting off ever pays for it.
+let masconLayerAdded = false;
+const applyMasconVisibility = () => {
+  if (displayConfig.showMascons && !masconLayerAdded) {
+    masconLayerAdded = true;
+    // Below the aquifer outlines, which stay clickable on top, and above the
+    // anomaly raster, which both views insert at index 0.
+    arcgisMap.map.add(masconLayer, arcgisMap.map.layers.indexOf(boundaryLayer));
+  }
+  masconLayer.visible = displayConfig.showMascons;
+};
 
 const analyzeGlobalAquifer = async ({aquiferId}) => {
   // Load boundary layer + zoom
@@ -1091,6 +1134,9 @@ const bootMapUi = async () => {
   // Preload the boundaries for later regional use; the camera is set by whichever
   // view we start in (global by default), so don't fit to the boundary extent here.
   boundaryLayer.load();
+  // Honors VITE_SETTINGS_SHOW_MASCONS; a no-op unless the deployment starts with
+  // the footprints on.
+  applyMasconVisibility();
 
   // dock the overlays inside the map UI, adding them to each corner in stack
   // order: top-right holds the drawing tools, then the load-progress bar, the
@@ -1250,6 +1296,21 @@ const bootMapUi = async () => {
   legendToggle.addEventListener("change", (e) => {
     displayConfig.showLegend = e.target.checked;
     applyLegendVisibility();
+  });
+
+  // GRACE mascon footprints. The first switch-on fetches the GeoJSON; every
+  // later toggle is just layer visibility.
+  masconToggle.addEventListener("change", (e) => {
+    displayConfig.showMascons = e.target.checked;
+    applyMasconVisibility();
+  });
+
+  // Mascon boundary width. The renderer is immutable once assigned, so restyling
+  // means handing the layer a new one.
+  masconWidthSlider.addEventListener("input", (e) => {
+    displayConfig.masconWidth = parseFloat(e.target.value);
+    masconWidthValue.textContent = `${displayConfig.masconWidth}px`;
+    masconLayer.renderer = masconRenderer();
   });
 
   // Half degree cells. Reloads from the other store, so it is the one setting

@@ -26,5 +26,6 @@ dist-ssr
 .env*.local
 
 .venv
+__pycache__/
 *.zarr/
 *.zarr3/

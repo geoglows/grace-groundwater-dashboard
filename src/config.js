@@ -46,6 +46,14 @@ export const ZARR_URL_HALF_DEGREE = fromEnv(
 // an absolute https:// URL to serve the 2 MB file from a CDN instead.
 export const AQUIFERS_URL = fromEnv(import.meta.env.VITE_AQUIFERS_URL, asset("aquifers.geojson"));
 
+// The native 3 degree GRACE mascon footprints, written by
+// data/mascon_boundaries.py. Only the 1706 mascons touching land are shipped
+// (0.4 MB) — the other 2845 are open ocean and irrelevant to groundwater. Run
+// the script with --include-ocean and point this at grace-mascons.geojson if
+// the full 4551 tiling is ever wanted. Only fetched when the user turns the
+// layer on, so it costs nothing at startup.
+export const MASCONS_URL = fromEnv(import.meta.env.VITE_MASCONS_URL, asset("grace-mascons-land.geojson"));
+
 // Nothing here resolves the header logo or its link: index.html carries those as
 // %VITE_LOGO_SRC% / %VITE_LOGO_HREF% template strings, substituted by Vite at
 // build time and used verbatim in the served HTML.

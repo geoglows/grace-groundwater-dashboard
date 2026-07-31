@@ -148,6 +148,10 @@ export const DISPLAY_DEFAULTS = {
   showBorders: envBool(import.meta.env.VITE_SETTINGS_SHOW_CELL_BORDERS, false),
   borderWidth: envNumber(import.meta.env.VITE_SETTINGS_CELL_BORDER_WIDTH, 0.5, {min: 0.5, max: 3}),
   showLegend: envBool(import.meta.env.VITE_SETTINGS_MAP_LEGEND_VISIBLE, true),
+  // The 3 degree GRACE mascon outlines. Off by default: it is an interpretation
+  // aid, not data, and turning it on is what pays for the GeoJSON download.
+  showMascons: envBool(import.meta.env.VITE_SETTINGS_SHOW_MASCONS, false),
+  masconWidth: envNumber(import.meta.env.VITE_SETTINGS_MASCON_WIDTH, 0.75, {min: 0.5, max: 3}),
   halfDegreeCells: envBool(import.meta.env.VITE_SETTINGS_HALF_DEGREE_CELLS, false),
   dynamicColorScale: envBool(import.meta.env.VITE_SETTINGS_DYNAMIC_COLOR_SCALE, true),
   fixedMaxValue: envNumber(import.meta.env.VITE_SETTINGS_FIXED_COLOR_SCALE_MAX, 30, {min: 1}),
