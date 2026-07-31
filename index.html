@@ -15,8 +15,8 @@
 </head>
 <body class="flex h-full flex-col overflow-hidden bg-neutral-100 font-sans">
 <header class="nav-bar-wrapper">
-  <a class="back-to-portal tooltip" href="/" data-tooltip="GEOGloWS Portal" aria-label="GEOGloWS Portal">
-    <img class="back-to-portal-logo" src="/geoglows-logo-nav.png" alt="GEOGloWS" width="473" height="80"/>
+  <a class="back-to-portal tooltip" href="%VITE_LOGO_HREF%" data-tooltip="%VITE_LOGO_ALT% Portal" aria-label="%VITE_LOGO_ALT% Portal">
+    <img class="back-to-portal-logo" src="%VITE_LOGO_SRC%" alt="%VITE_LOGO_ALT%" width="473" height="80"/>
   </a>
 
   <h1 class="app-title">
@@ -25,12 +25,10 @@
   </h1>
 
   <div class="nav-buttons">
-    <button id="global-view-button" class="icon-btn tooltip" data-tooltip="Global Map"
-            aria-label="Global Map" aria-pressed="true">
+    <button id="global-view-button" class="icon-btn tooltip" data-tooltip="Global Map" aria-label="Global Map" aria-pressed="true">
       <span data-icon="globe-americas" class="block size-6" aria-hidden="true"></span>
     </button>
-    <button id="refresh-layers" class="icon-btn tooltip" data-tooltip="Aquifer Scale"
-            aria-label="Aquifer Scale" aria-pressed="false">
+    <button id="refresh-layers" class="icon-btn tooltip" data-tooltip="Aquifer Scale" aria-label="Aquifer Scale" aria-pressed="false">
       <span data-icon="map" class="block size-6" aria-hidden="true"></span>
     </button>
     <button id="upload-button" class="icon-btn tooltip" data-tooltip="Upload GeoJSON" aria-label="Upload GeoJSON">
@@ -44,8 +42,10 @@
   <div id="auth-action" class="nav-auth"></div>
 </header>
 
-<div class="flex min-h-0 w-full flex-1 flex-col">
-  <arcgis-map id="aquifer-map" basemap="gray-vector" zoom="4" center="0,20" class="min-h-0 w-full flex-1 border-b-2 border-black">
+<div id="panel-stack" class="flex min-h-0 w-full flex-1 flex-col">
+  <!-- The id is not decorative: the sketch tool and the time slider bind to this
+       map through reference-element="aquifer-map". -->
+  <arcgis-map id="aquifer-map" class="min-h-0 w-full flex-1">
     <!-- Top-left: Navigation -->
     <arcgis-zoom slot="top-left"></arcgis-zoom>
     <arcgis-expand slot="top-left" title="Basemap Gallery">
@@ -57,12 +57,20 @@
   <!-- Drawing tools, docked top-right via view.ui.add() so they stack with the
        progress bar and legend in the same corner instead of overlapping them. -->
   <arcgis-sketch id="sketch-tool" reference-element="aquifer-map" title="Drawing Tools" creation-mode="single"></arcgis-sketch>
+  <!-- Drag this to trade height between the map and the chart; double-click (or
+       Home, when focused) restores the height configured in .env. Hidden along
+       with the chart panel it resizes. -->
+  <div id="panel-splitter" class="panel-splitter hidden" role="separator" aria-orientation="horizontal"
+       aria-label="Resize the map and chart" title="Drag to resize · double-click to reset" tabindex="0">
+    <span class="panel-splitter-grip" aria-hidden="true"></span>
+  </div>
+
   <!-- Starts hidden so the page is natively laid out for the global (whole-world)
        view — the map fills the full height and never resizes on load. The
        regional view (exitGlobalView) reveals this chart when needed. -->
-  <div id="timeseries-plot" class="hidden w-full shrink-0 grow-0 basis-[32%] bg-white">
+  <div id="timeseries-plot" class="ts-panel hidden w-full bg-white">
     <div class="flex h-full w-full items-center justify-center px-8 text-center text-2xl font-bold text-neutral-700">
-      Select an aquifer, draw a polygon, upload a boundary geojson, or press the globe button to animate the whole world.
+      Select an aquifer, draw a polygon, or upload a boundary geojson.
     </div>
   </div>
 </div>
@@ -179,12 +187,7 @@
       }
   </style>
   <label for="variable-select">Displayed Layer</label>
-  <select id="variable-select">
-    <option value="GWSa" selected>Groundwater Storage Anomaly (GWSa)</option>
-    <option value="TWSa">Total Water Storage Anomaly (TWSa)</option>
-    <option value="SMa">Soil Moisture Anomaly (SMa)</option>
-    <option value="SWEa">Snow Water Equivalent Anomaly (SWEa)</option>
-  </select>
+  <select id="variable-select"></select>
 </div>
 
 <div id="settings-modal" class="fixed inset-0 z-1000 hidden overflow-y-auto bg-black/50">
@@ -196,10 +199,19 @@
       <h3 class="mb-3 text-base font-bold text-neutral-800">Layer</h3>
       <div class="mb-3 flex items-center gap-3">
         <label for="opacity-slider" class="min-w-[120px] text-sm">Layer opacity</label>
-        <input type="range" id="opacity-slider" min="0" max="1" step="0.05" value="1"
+        <input type="range" id="opacity-slider" min="0" max="1" step="0.05"
                class="max-w-[150px] flex-1 cursor-pointer accent-sky-700">
-        <span id="opacity-value" class="min-w-[40px] text-sm text-neutral-600">100%</span>
+        <span id="opacity-value" class="min-w-[40px] text-sm text-neutral-600"></span>
       </div>
+    </div>
+
+    <div class="mb-6">
+      <h3 class="mb-3 text-base font-bold text-neutral-800">Water Balance Cells</h3>
+      <div class="mb-3 flex items-center gap-3">
+        <label for="half-degree-toggle" class="text-sm">Use half degree water balance cells (default 1.0 degree)</label>
+        <input type="checkbox" id="half-degree-toggle" class="size-[18px] shrink-0 cursor-pointer accent-sky-700">
+      </div>
+      <p class="mb-3 text-[13px] text-neutral-600">Switching reloads the map and the current analysis from the other dataset. Finer cellsmay take longer to prepare.</p>
     </div>
 
     <div class="mb-6">
@@ -210,72 +222,37 @@
       </div>
       <div class="mb-3 flex items-center gap-3">
         <label for="border-width" class="min-w-[120px] text-sm">Boundary width</label>
-        <input type="range" id="border-width" min="0.5" max="3" step="0.5" value="0.5"
+        <input type="range" id="border-width" min="0.5" max="3" step="0.5"
                class="max-w-[150px] flex-1 cursor-pointer accent-sky-700">
-        <span id="border-width-value" class="min-w-[40px] text-sm text-neutral-600">0.5px</span>
+        <span id="border-width-value" class="min-w-[40px] text-sm text-neutral-600"></span>
       </div>
     </div>
 
     <div class="mb-6">
       <h3 class="mb-3 text-base font-bold text-neutral-800">Color Palette</h3>
       <p class="mb-3 text-[13px] text-neutral-600">Choose a color scheme for the anomaly visualization</p>
-      <div class="flex flex-col gap-2">
-        <label class="flex cursor-pointer items-center gap-3 rounded-md border-2 border-neutral-300 px-3 py-2 transition hover:bg-neutral-100 has-[input:checked]:border-sky-700 has-[input:checked]:bg-sky-50">
-          <input type="radio" name="color-palette" value="default" checked class="hidden">
-          <span class="block h-5 w-20 rounded-sm border border-neutral-300"
-                style="background: linear-gradient(to right, #ff004e, #ffffff, #1c6eec);"></span>
-          <span class="text-sm text-neutral-800">Red-White-Blue (Default)</span>
-        </label>
-        <label class="flex cursor-pointer items-center gap-3 rounded-md border-2 border-neutral-300 px-3 py-2 transition hover:bg-neutral-100 has-[input:checked]:border-sky-700 has-[input:checked]:bg-sky-50">
-          <input type="radio" name="color-palette" value="viridis" class="hidden">
-          <span class="block h-5 w-20 rounded-sm border border-neutral-300"
-                style="background: linear-gradient(to right, #440154, #21918c, #fde725);"></span>
-          <span class="text-sm text-neutral-800">Viridis (Colorblind Safe)</span>
-        </label>
-        <label class="flex cursor-pointer items-center gap-3 rounded-md border-2 border-neutral-300 px-3 py-2 transition hover:bg-neutral-100 has-[input:checked]:border-sky-700 has-[input:checked]:bg-sky-50">
-          <input type="radio" name="color-palette" value="cividis" class="hidden">
-          <span class="block h-5 w-20 rounded-sm border border-neutral-300"
-                style="background: linear-gradient(to right, #00204d, #7c7b78, #ffea46);"></span>
-          <span class="text-sm text-neutral-800">Cividis (Colorblind Safe)</span>
-        </label>
-        <label class="flex cursor-pointer items-center gap-3 rounded-md border-2 border-neutral-300 px-3 py-2 transition hover:bg-neutral-100 has-[input:checked]:border-sky-700 has-[input:checked]:bg-sky-50">
-          <input type="radio" name="color-palette" value="brown-teal" class="hidden">
-          <span class="block h-5 w-20 rounded-sm border border-neutral-300"
-                style="background: linear-gradient(to right, #8c510a, #f5f5f5, #01665e);"></span>
-          <span class="text-sm text-neutral-800">Brown-Teal (Colorblind Safe)</span>
-        </label>
-        <label class="flex cursor-pointer items-center gap-3 rounded-md border-2 border-neutral-300 px-3 py-2 transition hover:bg-neutral-100 has-[input:checked]:border-sky-700 has-[input:checked]:bg-sky-50">
-          <input type="radio" name="color-palette" value="purple-green" class="hidden">
-          <span class="block h-5 w-20 rounded-sm border border-neutral-300"
-                style="background: linear-gradient(to right, #762a83, #f7f7f7, #1b7837);"></span>
-          <span class="text-sm text-neutral-800">Purple-Green (Colorblind Safe)</span>
-        </label>
-        <label class="flex cursor-pointer items-center gap-3 rounded-md border-2 border-neutral-300 px-3 py-2 transition hover:bg-neutral-100 has-[input:checked]:border-sky-700 has-[input:checked]:bg-sky-50">
-          <input type="radio" name="color-palette" value="rainbow" class="hidden">
-          <span class="block h-5 w-20 rounded-sm border border-neutral-300"
-                style="background: linear-gradient(to right, #d73027, #fee08b, #a6d96a, #1a6698);"></span>
-          <span class="text-sm text-neutral-800">Red-Yellow-Green-Blue</span>
-        </label>
-      </div>
+      <div id="palette-options" class="flex flex-col gap-2"></div>
     </div>
 
     <div class="mb-6">
-      <h3 class="mb-3 text-base font-bold text-neutral-800">Color Scale Range</h3>
+      <h3 class="mb-3 text-base font-bold text-neutral-800">Color Bar</h3>
+      <div class="mb-3 flex items-center gap-3">
+        <label for="legend-toggle" class="min-w-[120px] text-sm">Show color bar on map</label>
+        <input type="checkbox" id="legend-toggle" class="size-[18px] cursor-pointer accent-sky-700">
+      </div>
       <div class="mb-3 flex items-center gap-3">
         <label for="dynamic-scale-toggle" class="min-w-[120px] text-sm">Dynamic scale (fit to data)</label>
-        <input type="checkbox" id="dynamic-scale-toggle" checked class="size-[18px] cursor-pointer accent-sky-700">
+        <input type="checkbox" id="dynamic-scale-toggle" class="size-[18px] cursor-pointer accent-sky-700">
       </div>
-      <p class="mb-3 text-[13px] text-neutral-600">When enabled, the color scale fits the actual min/max values in the
-                                                   selected region, with 0 always shown as the center color. When disabled, uses a fixed range of -30 to +30 cm.</p>
+      <p id="dynamic-scale-note" class="mb-3 text-[13px] text-neutral-600">When enabled, the color scale fits the actual
+                                                                          min/max values in the selected region, with 0 always shown as the center color.</p>
     </div>
 
     <div class="mb-6">
       <h3 class="mb-3 text-base font-bold text-neutral-800">Cache</h3>
-      <p class="mb-3 text-[13px] text-neutral-600">Delete all locally cached data (coordinates and the global
-                                                   animation). The next page refresh will reload everything from the network, simulating a first visit.</p>
+      <p class="mb-3 text-[13px] text-neutral-600">Delete all locally cached data (coordinates and the global animation). The next page refresh will reload everything from the network, simulating a first visit.</p>
       <div class="mb-3 flex items-center gap-3">
-        <button id="clear-cache-button"
-                class="cursor-pointer rounded border border-red-800 bg-red-600 px-4 py-2 text-sm text-white transition hover:bg-red-800 disabled:cursor-default disabled:border-red-300 disabled:bg-red-300">
+        <button id="clear-cache-button" class="cursor-pointer rounded border border-red-800 bg-red-600 px-4 py-2 text-sm text-white transition hover:bg-red-800 disabled:cursor-default disabled:border-red-300 disabled:bg-red-300">
           Clear cached data
         </button>
         <span id="clear-cache-status" class="text-[13px] text-neutral-600"></span>
@@ -283,8 +260,7 @@
     </div>
 
     <div class="mt-5 flex justify-end gap-2.5">
-      <button id="settings-close"
-              class="cursor-pointer rounded border border-neutral-300 bg-sky-700 px-5 py-2 text-sm text-white transition hover:bg-sky-800">
+      <button id="settings-close" class="cursor-pointer rounded border border-neutral-300 bg-sky-700 px-5 py-2 text-sm text-white transition hover:bg-sky-800">
         Close
       </button>
     </div>
@@ -294,10 +270,8 @@
 <div id="upload-modal" class="fixed inset-0 z-1000 hidden overflow-y-auto bg-black/50">
   <div class="mx-auto my-[5vh] w-[85%] max-w-[500px] rounded-lg border border-neutral-500 bg-neutral-50 p-5">
     <h2 class="text-2xl font-bold text-neutral-900">Upload Polygon</h2>
-    <p class="mb-3 text-[13px] text-neutral-600">Upload a GeoJSON file containing polygon geometries to analyze GRACE
-                                                 groundwater data within the polygon boundary.</p>
+    <p class="mb-3 text-[13px] text-neutral-600">Upload a GeoJSON file containing polygon geometries to analyze GRACE groundwater data within the polygon boundary.</p>
     <hr class="my-4 border-t border-neutral-300"/>
-
     <div id="upload-drop-zone"
          class="my-4 cursor-pointer rounded-lg border-2 border-dashed border-neutral-300 px-5 py-10 text-center transition hover:border-sky-700 hover:bg-sky-50 data-[drag=true]:border-sky-700 data-[drag=true]:bg-sky-50">
       <span data-icon="cloud-arrow-up" class="mx-auto mb-2 block size-8 text-neutral-400" aria-hidden="true"></span>
@@ -314,22 +288,18 @@
     <div id="upload-file-info"
          class="my-3 flex hidden items-center justify-between rounded-md border border-sky-700 bg-sky-50 px-3.5 py-2.5 text-sm text-neutral-800">
       <span id="upload-file-name"></span>
-      <button id="upload-clear-file" title="Remove file"
-              class="cursor-pointer text-neutral-400 transition hover:text-red-600">
+      <button id="upload-clear-file" title="Remove file" class="cursor-pointer text-neutral-400 transition hover:text-red-600">
         <span data-icon="x-mark" class="block size-5" aria-hidden="true"></span>
       </button>
     </div>
 
-    <div id="upload-error"
-         class="my-3 hidden rounded-md border border-red-600 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-600"></div>
+    <div id="upload-error" class="my-3 hidden rounded-md border border-red-600 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-600"></div>
 
     <div class="mt-5 flex justify-end gap-2.5">
-      <button id="upload-cancel"
-              class="cursor-pointer rounded border border-neutral-300 bg-white px-5 py-2 text-sm text-neutral-800 transition hover:bg-neutral-100">
+      <button id="upload-cancel" class="cursor-pointer rounded border border-neutral-300 bg-white px-5 py-2 text-sm text-neutral-800 transition hover:bg-neutral-100">
         Cancel
       </button>
-      <button id="upload-submit" disabled
-              class="cursor-pointer rounded border border-neutral-300 bg-sky-700 px-5 py-2 text-sm text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-neutral-300">
+      <button id="upload-submit" disabled class="cursor-pointer rounded border border-neutral-300 bg-sky-700 px-5 py-2 text-sm text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-neutral-300">
         Analyze
       </button>
     </div>

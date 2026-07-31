@@ -25,5 +25,6 @@ dist-ssr
 .vercel
 .env*.local
 
+.venv
 *.zarr/
 *.zarr3/

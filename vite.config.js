@@ -1,34 +1,58 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import {defineConfig, loadEnv} from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
-// The base path is baked into the bundle at BUILD time — index.html, every JS
-// chunk, the worker URL, and every asset URL are emitted with it as a prefix.
-// A build whose base does not match where it is actually served fails
-// completely and confusingly: the browser requests /<stale-base>/assets/*.js
-// and the CDN answers 404 (or 503, which is what CloudFront returns when no
-// cache behavior matches the path) for every single module. There is exactly
-// one knob — VITE_BASE_PATH — and the resolved value is printed below so a
-// mismatch is visible in the deploy log instead of only in a broken browser.
+const LOCAL_ZARR_PREFIX = '/local-zarr';
+
+const serveLocalZarr = (dir) => ({
+  name: 'serve-local-zarr',
+  apply: 'serve', // dev only; a production build must point at a real URL
+  configureServer(server) {
+    const root = path.resolve(dir);
+    if (!fs.existsSync(root)) {
+      server.config.logger.warn(`[local-zarr] LOCAL_ZARR_DIR does not exist: ${root}`);
+      return;
+    }
+    server.config.logger.info(`[local-zarr] serving ${root} at ${LOCAL_ZARR_PREFIX}/`);
+    server.middlewares.use(LOCAL_ZARR_PREFIX, (req, res, next) => {
+      // The prefix is stripped by connect, so req.url is the store-relative path.
+      const rel = decodeURIComponent((req.url ?? '').split('?')[0]).replace(/^\/+/, '');
+      const file = path.resolve(root, rel);
+      // Anything that escapes the configured directory is not ours to serve.
+      if (file !== root && !file.startsWith(root + path.sep)) {
+        res.statusCode = 403;
+        res.end();
+        return;
+      }
+      let stat;
+      try {
+        stat = fs.statSync(file);
+      } catch {
+        res.statusCode = 404;
+        res.end();
+        return;
+      }
+      if (!stat.isFile()) return next();
+      res.setHeader('Content-Type', file.endsWith('.json') ? 'application/json' : 'application/octet-stream');
+      res.setHeader('Content-Length', stat.size);
+      res.setHeader('Cache-Control', 'no-store'); // rebuild the store, reload, see it
+      fs.createReadStream(file).pipe(res);
+    });
+  },
+});
+
 const normalizeBase = (value) => {
   const trimmed = (value ?? '').trim();
   if (!trimmed || trimmed === '/') return '/';
-  // An absolute origin (e.g. https://cdn.example.com/app) is passed through so
-  // assets can be served from a different host than index.html.
   if (/^https?:\/\//i.test(trimmed)) return `${trimmed.replace(/\/+$/, '')}/`;
   return `/${trimmed.replace(/^\/+|\/+$/g, '')}/`;
 };
 
 export default defineConfig(({mode, command}) => {
   const env = loadEnv(mode, '.', '');
-  // Only genuine standalone preview deploys are served at the domain root.
-  // Production AND the staging custom environment are served under the portal
-  // subpath, so both must honor VITE_BASE_PATH. VERCEL_ENV is 'preview' for a
-  // custom environment, so key off VERCEL_TARGET_ENV, which carries the custom
-  // environment name ('staging').
   const targetEnv = env.VERCEL_TARGET_ENV || env.VERCEL_ENV;
-  const servedAtRoot =
-    env.VERCEL === '1' && targetEnv !== 'production' && targetEnv !== 'staging';
-
+  const servedAtRoot = env.VERCEL === '1' && targetEnv !== 'production' && targetEnv !== 'staging';
   const base = servedAtRoot ? '/' : normalizeBase(env.VITE_BASE_PATH);
 
   if (command === 'build') {
@@ -41,7 +65,7 @@ export default defineConfig(({mode, command}) => {
 
   return {
     base,
-    plugins: [tailwindcss()],
+    plugins: [tailwindcss(), env.LOCAL_ZARR_DIR ? serveLocalZarr(env.LOCAL_ZARR_DIR) : null],
     build: {
       // The ArcGIS SDK explodes into ~1300 tiny ES modules. Vite's default
       // behavior injects a <link rel="modulepreload"> for the entire entry

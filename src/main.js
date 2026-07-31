@@ -22,97 +22,48 @@ import * as reactiveUtils from "@arcgis/core/core/reactiveUtils.js";
 import {get} from "zarrita";
 
 import {cellPolygonFromCenter} from "./cells.js";
-import {AQUIFERS_URL, PORTAL_URL, ZARR_URL} from "./config.js";
+import {AQUIFERS_URL, ZARR_URL, ZARR_URL_HALF_DEGREE} from "./config.js";
 import {clearCacheDB, getOrFetchCoords} from "./db.js";
 import {loadGlobalVariable} from "./globalFramesClient.js";
 import {createGlobalRenderer} from "./globalLayer.js";
 import {hydrateIcons} from "./icons.js";
 import {parseGeoJSONFile} from "./polygonUploads.js";
+import {
+  COLOR_PALETTES,
+  DEFAULT_VIEW,
+  DISPLAY_DEFAULTS,
+  GLOBAL_PLAY_RATE_MS,
+  MAP_BASEMAP,
+  MAP_CENTER,
+  MAP_ZOOM,
+  paletteCssGradient,
+  PREFETCH_VARIABLES,
+  REGIONAL_PLAY_RATE_MS,
+  UNITS,
+  VALUE_LABEL,
+  VARIABLES,
+} from "./settings.js";
+import {initPanelSplitter} from "./splitPanels.js";
 import {renderTimeseriesChart} from "./timeseriesChart.js";
 import {openZarrArray} from "./zarrStore.js";
 
 hydrateIcons();  // heroicons
 
-// The portal link is the one URL in the markup that is a navigation target
-// rather than an asset, so Vite does not rewrite it for the base path. Patched
-// here (synchronously, before any await) from the configured portal URL.
-document.querySelector(".back-to-portal")?.setAttribute("href", PORTAL_URL);
+// Branding (logo, its link, its alt text) is not set here: index.html carries it
+// as %VITE_*% template strings that Vite substitutes at build time.
 
-// The mapped variables. All live in the same zarr store with identical
-// shape/chunking/fill handling, so every read and render path is parameterized
-// by variable name; the dropdown docked under the map legend switches which
-// one drives the map and chart. Variables are loaded lazily, so listing one
-// here before its arrays land in the store is fine — it shows a "not
-// available yet" notice when selected and starts working once the data exists.
-const VARIABLES = {
-  GWSa: {short: "GWS", longName: "Groundwater Storage Anomaly"},
-  TWSa: {short: "TWS", longName: "Total Water Storage Anomaly"},
-  SMa: {short: "SM", longName: "Soil Moisture Anomaly"},
-  SWEa: {short: "SWE", longName: "Snow Water Equivalent Anomaly"},
-};
-
-// Configuration state
-const displayConfig = {
-  variable: "GWSa",          // which anomaly is displayed (see VARIABLES)
-  showBorders: false,
-  borderWidth: 0.5,
-  colorPalette: "default",
-  dynamicColorScale: false,  // toggle for dynamic vs fixed color scale
-  maxValue: 30,              // dynamic max (calculated from data when enabled)
-  fixedMaxValue: 30,         // fixed max (always 30)
-  opacity: 1                 // anomaly layer opacity (regional feature layer + global raster)
-};
-
-// Color palettes - use normalized positions (-1 to 1) that get scaled to actual data range
-const colorPalettes = {
-  default: [
-    {position: -1, color: "#ff004e"},
-    {position: 0, color: "#ffffff"},
-    {position: 1, color: "#1c6eec"}
-  ],
-  viridis: [
-    {position: -1, color: "#440154"},
-    {position: 0, color: "#21918c"},
-    {position: 1, color: "#fde725"}
-  ],
-  cividis: [
-    {position: -1, color: "#00204d"},
-    {position: 0, color: "#7c7b78"},
-    {position: 1, color: "#ffea46"}
-  ],
-  "brown-teal": [
-    {position: -1, color: "#8c510a"},
-    {position: 0, color: "#f5f5f5"},
-    {position: 1, color: "#01665e"}
-  ],
-  "purple-green": [
-    {position: -1, color: "#762a83"},
-    {position: 0, color: "#f7f7f7"},
-    {position: 1, color: "#1b7837"}
-  ],
-  "rainbow": [
-    {position: -1, color: "#d73027"},
-    {position: -0.33, color: "#fee08b"},
-    {position: 0.33, color: "#a6d96a"},
-    {position: 1, color: "#1a6698"}
-  ]
-};
+const displayConfig = {...DISPLAY_DEFAULTS};
 
 // Generate color stops scaled to max value (dynamic or fixed based on toggle)
 const generateStops = () => {
-  const palette = colorPalettes[displayConfig.colorPalette];
+  const {stops} = COLOR_PALETTES[displayConfig.colorPalette];
   const maxVal = displayConfig.dynamicColorScale ? displayConfig.maxValue : displayConfig.fixedMaxValue;
-  return palette.map(({position, color}) => {
+  return stops.map(({position, color}) => {
     const value = Math.round(position * maxVal);
-    const label = value === 0 ? "0" : `${value} cm`;
+    const label = value === 0 ? "0" : `${value} ${UNITS}`;
     return {value, color, label};
   });
 };
-
-// Which variables are downloaded eagerly at startup, each in its own worker.
-// The rest load on first selection. GWSa and TWSa are the two the toggle is
-// actually used for, so paying for both up front makes switching instant.
-const PREFETCH_VARIABLES = ["GWSa", "TWSa"];
 
 // Map elements
 const arcgisMap = document.querySelector("arcgis-map");
@@ -120,6 +71,18 @@ const sketchTool = document.getElementById("sketch-tool");
 const timeSlider = document.getElementById("time-slider");
 const timeseriesPlotDiv = document.getElementById("timeseries-plot");
 const appInstructions = timeseriesPlotDiv.innerHTML
+
+arcgisMap.basemap = MAP_BASEMAP;
+arcgisMap.center = MAP_CENTER;
+
+// The draggable divider between the map and the chart. Owns the visibility of
+// the chart panel from here on: showing or hiding it any other way would leave
+// the divider floating under a map with nothing beneath it.
+const panels = initPanelSplitter({
+  stack: document.getElementById("panel-stack"),
+  chartPanel: timeseriesPlotDiv,
+  splitter: document.getElementById("panel-splitter"),
+});
 
 // The Chart.js instance currently occupying the timeseries panel, or null. Held
 // at module scope because the panel is torn down from several unrelated places
@@ -138,11 +101,72 @@ const borderToggle = document.getElementById("border-toggle");
 const borderWidthSlider = document.getElementById("border-width");
 const borderWidthValue = document.getElementById("border-width-value");
 const dynamicScaleToggle = document.getElementById("dynamic-scale-toggle");
-// Sync initial state from the checkboxes (which render `checked`); otherwise the
-displayConfig.dynamicColorScale = dynamicScaleToggle.checked;
-displayConfig.showBorders = borderToggle.checked;
+const dynamicScaleNote = document.getElementById("dynamic-scale-note");
+const legendToggle = document.getElementById("legend-toggle");
+const halfDegreeToggle = document.getElementById("half-degree-toggle");
+const opacitySlider = document.getElementById("opacity-slider");
+const opacityValue = document.getElementById("opacity-value");
+const paletteOptions = document.getElementById("palette-options");
 
-const openArray = (name) => openZarrArray(ZARR_URL, name);
+// Build the two lists that are generated from data rather than written out in
+// index.html — the layer dropdown from VARIABLES, the palette radios from
+// COLOR_PALETTES — then put every control in the settings modal at the value
+// .env asked for. Called once, before anything listens for changes.
+const syncSettingsControls = () => {
+  variableSelect.replaceChildren(
+    ...Object.entries(VARIABLES).map(([key, {longName}]) => {
+      const option = document.createElement("option");
+      option.value = key;
+      option.textContent = `${longName} (${key})`;
+      return option;
+    }),
+  );
+  variableSelect.value = displayConfig.variable;
+
+  paletteOptions.replaceChildren(
+    ...Object.entries(COLOR_PALETTES).map(([key, {label}]) => {
+      const option = document.createElement("label");
+      option.className = "flex cursor-pointer items-center gap-3 rounded-md border-2 border-neutral-300 px-3 py-2 transition hover:bg-neutral-100 has-[input:checked]:border-sky-700 has-[input:checked]:bg-sky-50";
+
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "color-palette";
+      radio.value = key;
+      radio.className = "hidden";
+      radio.checked = key === displayConfig.colorPalette;
+
+      const swatch = document.createElement("span");
+      swatch.className = "block h-5 w-20 rounded-sm border border-neutral-300";
+      swatch.style.background = paletteCssGradient(key);
+
+      const name = document.createElement("span");
+      name.className = "text-sm text-neutral-800";
+      name.textContent = label;
+
+      option.append(radio, swatch, name);
+      return option;
+    }),
+  );
+
+  opacitySlider.value = String(displayConfig.opacity);
+  opacityValue.textContent = `${Math.round(displayConfig.opacity * 100)}%`;
+  borderToggle.checked = displayConfig.showBorders;
+  borderWidthSlider.value = String(displayConfig.borderWidth);
+  borderWidthValue.textContent = `${displayConfig.borderWidth}px`;
+  legendToggle.checked = displayConfig.showLegend;
+  halfDegreeToggle.checked = displayConfig.halfDegreeCells;
+  dynamicScaleToggle.checked = displayConfig.dynamicColorScale;
+  // The fixed range is configurable, so the sentence explaining it has to be too.
+  dynamicScaleNote.textContent = `When enabled, the color scale fits the actual min/max values in the selected region, with 0 always shown as the center color. When disabled, uses a fixed range of -${displayConfig.fixedMaxValue} to +${displayConfig.fixedMaxValue} ${UNITS}.`;
+};
+
+// Which of the two resolutions the app is currently reading. Every zarr read,
+// every IndexedDB cache key, and every derived quantity (cell size, the raster's
+// georeferencing) follows this, so the 1.0 and 0.5 degree stores never mix —
+// and switching back to one already loaded costs nothing but a cache hit.
+const activeZarrUrl = () => (displayConfig.halfDegreeCells ? ZARR_URL_HALF_DEGREE : ZARR_URL);
+
+const openArray = (name) => openZarrArray(activeZarrUrl(), name);
 
 // ---- Lazily-loaded shared inputs -------------------------------------------
 // NOTHING in this module may sit at the top level behind `await`. A module with
@@ -157,7 +181,7 @@ const openArray = (name) => openZarrArray(ZARR_URL, name);
 
 let coordsPromise = null;
 const ensureCoords = () => {
-  coordsPromise ??= getOrFetchCoords({zarrUrl: ZARR_URL}).catch((err) => {
+  coordsPromise ??= getOrFetchCoords({zarrUrl: activeZarrUrl()}).catch((err) => {
     coordsPromise = null;
     geoPromise = null;
     throw err;
@@ -176,19 +200,71 @@ const ensureGeo = () => {
   return geoPromise;
 };
 
+// The time array holds plain numbers; the CF `units` attribute on it is what
+// says what they count and from when ("days since 2002-01-01"). Assuming an
+// epoch instead of reading this is a silent, total failure — every date in the
+// slider, the chart, and the CSV export is simply wrong by the difference
+// between the assumed and actual epochs, with nothing anywhere to indicate it.
+const TIME_UNIT_MS = {
+  days: 86_400_000,
+  hours: 3_600_000,
+  minutes: 60_000,
+  seconds: 1_000,
+  milliseconds: 1,
+};
+const parseTimeUnits = (units) => {
+  const match = /^\s*(\w+)\s+since\s+(.+?)\s*$/i.exec(units ?? "");
+  if (!match) return null;
+  const step = TIME_UNIT_MS[match[1].toLowerCase().replace(/s$/, "") + "s"];
+  if (!step) return null;
+  // "2002-01-01", "2002-01-01 00:00:00", and the ISO form all appear in the
+  // wild. A reference time with no zone is UTC by CF convention, and Date.parse
+  // would otherwise read the date-time form as local.
+  let stamp = match[2].trim().replace(" ", "T");
+  if (!/[zZ]|[+-]\d{2}:?\d{2}$/.test(stamp)) stamp = `${stamp.includes("T") ? stamp : `${stamp}T00:00:00`}Z`;
+  const epochMs = Date.parse(stamp);
+  return Number.isFinite(epochMs) ? {step, epochMs} : null;
+};
+
+// The stored instants are absolute UTC, and the calendar date is the datum: a
+// month labelled April 2002 must read as April 2002 in Denver and in Tokyo
+// alike. But every renderer downstream formats a Date in the browser's local
+// zone — the ArcGIS time slider's labels, and Chart.js ticks and tooltips
+// through date-fns — so west of Greenwich 2002-04-01T00:00Z prints as
+// "3/31/2002". Each instant is therefore rebased to the local Date holding the
+// same wall-clock fields its UTC value had. The true instant is deliberately
+// discarded: nothing downstream wants an instant, only the month it names.
+//
+// Built from the parts rather than by adding a fixed offset on purpose. An
+// offset taken once (or taken today) is wrong for every value on the other side
+// of a DST boundary, and being an hour out at midnight moves the date a whole
+// day. Passing the parts to the local-time constructor makes the engine resolve
+// the offset in effect for that particular date.
+const toDisplayDate = (ms) => {
+  const utc = new Date(ms);
+  return new Date(
+    utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate(),
+    utc.getUTCHours(), utc.getUTCMinutes(), utc.getUTCSeconds(),
+  );
+};
+
 // The shared time axis. `timeDates` is null until ensureTimeDates() resolves;
-// every caller that indexes it awaits that first.
+// every caller that indexes it awaits that first. These are display dates in
+// the sense above — read their local fields, never their UTC ones.
 let timeDates = null;
 let timeDatesPromise = null;
 const ensureTimeDates = () => {
   timeDatesPromise ??= (async () => {
     const timeNode = await openArray("time");
     const timeIntegers = await get(timeNode, [null]);
-    timeDates = Array.from(timeIntegers.data).map((t) => {
-      const baseDate = new Date(Date.UTC(2000, 0, 1)); // time units: days since 2000-01-01
-      baseDate.setUTCDate(baseDate.getUTCDate() + Number(t));
-      return baseDate;
-    });
+    const units = parseTimeUnits(timeNode.attrs?.units);
+    if (!units) {
+      // Nothing better to do than the historical assumption, but say so: dates
+      // that are quietly wrong are worse than dates that are wrong and logged.
+      console.warn(`The time array has no usable "units" attribute (got ${JSON.stringify(timeNode.attrs?.units)}); falling back to days since 2000-01-01, which is very likely wrong.`);
+    }
+    const {step, epochMs} = units ?? {step: TIME_UNIT_MS.days, epochMs: Date.UTC(2000, 0, 1)};
+    timeDates = Array.from(timeIntegers.data).map((t) => toDisplayDate(epochMs + Number(t) * step));
     return timeDates;
   })().catch((err) => {
     timeDatesPromise = null; // allow the globe button to retry
@@ -309,10 +385,24 @@ const mapLegendTitle = document.getElementById("map-legend-title");
 const mapLegendBar = document.getElementById("map-legend-bar");
 const mapLegendMin = document.getElementById("map-legend-min");
 const mapLegendMax = document.getElementById("map-legend-max");
-// GWSa/TWSa dropdown, docked under the legend; switches both views' data.
+// Layer dropdown, docked under the color bar; switches both views' data.
 const variableSelectPanel = document.getElementById("variable-select-panel");
 const variableSelect = document.getElementById("variable-select");
-displayConfig.variable = variableSelect.value; // sync from the markup's `selected` option
+syncSettingsControls(); // .env -> every control, including this dropdown
+
+// The color bar is shown when two things agree: an anomaly layer is on the map
+// with a meaningful ramp (set by the views, below) and the user/deployment has
+// asked to see it (VITE_SETTINGS_MAP_LEGEND_VISIBLE and the settings checkbox).
+// Keeping them apart means toggling the checkbox can never make a color bar
+// appear over a map that has no data behind it.
+let legendAvailable = false;
+const applyLegendVisibility = () => {
+  mapLegendDiv.classList.toggle("hidden", !(legendAvailable && displayConfig.showLegend));
+};
+const setLegendAvailable = (available) => {
+  legendAvailable = available;
+  applyLegendVisibility();
+};
 
 const globalView = {
   active: false,
@@ -354,6 +444,10 @@ let regionalVariableHandler = null;
 // Bumped whenever any analysis (regional or global) starts or the app resets,
 // so an in-flight regional run abandons before mutating shared UI state.
 let analysisRunSeq = 0;
+// The polygon the showing regional analysis was run for, or null when none is
+// showing. Only the resolution switch reads it, to redo that analysis against
+// the other store instead of making the user re-select the aquifer.
+let lastAnalyzedPolygon = null;
 let sliderWatcherInstalled = false;
 const ensureSliderWatcher = () => {
   if (sliderWatcherInstalled) return;
@@ -395,10 +489,10 @@ const updateMapLegend = () => {
   const min = stops[0].value;
   const max = stops[stops.length - 1].value;
   const gradient = stops.map((s) => `${s.color} ${(((s.value - min) / (max - min)) * 100).toFixed(1)}%`).join(", ");
-  mapLegendTitle.textContent = `${VARIABLES[displayConfig.variable].longName} (cm)`;
+  mapLegendTitle.textContent = `${VARIABLES[displayConfig.variable].longName} (${UNITS})`;
   mapLegendBar.style.background = `linear-gradient(to right, ${gradient})`;
-  mapLegendMin.textContent = `${min} cm`;
-  mapLegendMax.textContent = `${max} cm`;
+  mapLegendMin.textContent = `${min} ${UNITS}`;
+  mapLegendMax.textContent = `${max} ${UNITS}`;
 };
 
 const setGlobalGrid = (varName) => {
@@ -418,7 +512,11 @@ const showVariableUnavailable = (varName) => {
 // carries a single frame (~216 KB) rather than the whole series, so the grid is
 // installed with nT: 1 and gridVar is cleared — the full series replaces it when
 // the load finishes.
-const drawGlobalPreview = (varName, {frame, nLat, nLon}) => {
+const drawGlobalPreview = (varName, zarrUrl, {frame, nLat, nLon}) => {
+  // A worker started against the other resolution keeps running to finish its
+  // cache entry, but its previews and progress belong to a store the map is no
+  // longer showing.
+  if (zarrUrl !== activeZarrUrl()) return;
   if (!globalView.active || displayConfig.variable !== varName || !globalView.renderer) return;
   const {latEdgeMin, cellSize} = globalView.geo;
   globalView.renderer.setStops(generateStops());
@@ -434,20 +532,26 @@ const drawGlobalPreview = (varName, {frame, nLat, nLon}) => {
 const ensureGlobalData = (varName) => {
   const entry = (globalView.byVar[varName] ??= {});
   if (!entry.dataPromise) {
+    // Pinned for the life of this load: switching resolution clears byVar, so a
+    // worker that finishes afterwards writes into an entry nothing reads, and
+    // its progress and previews are filtered out by this URL.
+    const zarrUrl = activeZarrUrl();
     entry.dataPromise = (async () => {
       globalView.geo = await ensureGeo();
       const {frames, nT, nLat, nLon, fromCache, stats} = await loadGlobalVariable({
         varName,
+        zarrUrl,
         geo: globalView.geo,
         onProgress: (fraction) => {
+          if (zarrUrl !== activeZarrUrl()) return;
           if (!globalView.active || displayConfig.variable !== varName) return;
           updateGlobalProgress(fraction);
         },
-        onPreview: (preview) => drawGlobalPreview(varName, preview),
+        onPreview: (preview) => drawGlobalPreview(varName, zarrUrl, preview),
       });
       entry.data = {frames, nT, nLat, nLon, fromCache};
       entry.stats = stats;
-      console.info(`Global ${varName} ready (${fromCache ? "from cache" : "from network"}): ${stats.validTimeIndices.length}/${nT} months with data, dynamic color scale ±${stats.suggestedMax} cm`);
+      console.info(`Global ${varName} ready (${fromCache ? "from cache" : "from network"}): ${stats.validTimeIndices.length}/${nT} months with data, dynamic color scale ±${stats.suggestedMax} ${UNITS}`);
     })().catch((err) => {
       entry.dataPromise = null; // allow retry after a failure
       throw err;
@@ -489,9 +593,12 @@ const analyzeGlobalView = async ({keepView = false} = {}) => {
   if (possiblyExistingLayer) arcgisMap.map.layers.remove(possiblyExistingLayer);
   timeSlider.widget?.stop();
   clearTimeseriesPanel();
-  timeseriesPlotDiv.classList.add("hidden");
+  panels.setChartVisible(false);
 
-  const zoomPromise = keepView ? Promise.resolve() : arcgisMap.view.goTo({center: [0, 20], zoom: 4}).catch(() => {
+  const zoomPromise = keepView ? Promise.resolve() : arcgisMap.view.goTo({
+    center: MAP_CENTER,
+    zoom: MAP_ZOOM,
+  }).catch(() => {
   });
 
   if (!globalView.renderer) globalView.renderer = createGlobalRenderer({title: "GRACE Anomalies (Global)"});
@@ -514,21 +621,40 @@ const analyzeGlobalView = async ({keepView = false} = {}) => {
   } catch (err) {
     console.error(`Failed to load the global ${varName} dataset`, err);
     if (globalView.runSeq === runId && globalView.active) {
-      globalProgressLabel.textContent = `Failed to load ${VARIABLES[varName].longName}. It may not be available yet — choose another layer or press the globe to retry.`;
+      // A deployment that has not published a half degree store fails here and
+      // nowhere else, so the message names the setting that caused it.
+      globalProgressLabel.textContent = displayConfig.halfDegreeCells
+        ? `Failed to load ${VARIABLES[varName].longName} at half degree resolution. That dataset may not be published — turn off "half degree water balance cells" in settings, or choose another layer.`
+        : `Failed to load ${VARIABLES[varName].longName}. It may not be available yet — choose another layer or press the globe to retry.`;
       globalProgressFill.style.width = "0%";
       // don't leave another variable's raster on screen looking like this one
       if (globalView.gridVar !== varName) {
         globalView.renderer.clear();
         globalView.gridVar = null;
-        mapLegendDiv.classList.add("hidden");
+        setLegendAvailable(false);
       }
     }
     return;
   }
   if (globalView.runSeq !== runId || !globalView.active) return;
-  globalProgressDiv.classList.add("hidden");
 
   const {stats} = globalView.byVar[varName];
+  // A store whose chunks are all fill loads perfectly and contains nothing. That
+  // is not an error anywhere in the fetch path, so without this check the app
+  // hides the progress bar and paints an empty world — indistinguishable from a
+  // rendering bug. Say what actually happened instead.
+  if (!stats.validTimeIndices.length) {
+    console.warn(`Global ${varName} loaded but every value is a fill value — the store has no data for this variable`);
+    globalProgressDiv.classList.remove("hidden");
+    globalProgressLabel.textContent = `${VARIABLES[varName].longName} has no data in this dataset — every cell of every month is a fill value. Choose another layer, or point the app at a store that has ${varName}.`;
+    globalProgressFill.style.width = "0%";
+    globalView.renderer.clear();
+    globalView.gridVar = null;
+    setLegendAvailable(false);
+    return;
+  }
+  globalProgressDiv.classList.add("hidden");
+
   // Fit the color scale to the 95th percentile of |values| across the whole
   // dataset; a plain max would let a few extreme cells wash out the ramp.
   displayConfig.maxValue = stats.suggestedMax;
@@ -537,13 +663,13 @@ const analyzeGlobalView = async ({keepView = false} = {}) => {
   globalView.renderer.setBorders({show: displayConfig.showBorders, width: displayConfig.borderWidth});
   globalView.renderer.layer.opacity = displayConfig.opacity;
   updateMapLegend();
-  mapLegendDiv.classList.remove("hidden");
+  setLegendAvailable(true);
 
   const validDates = stats.validTimeIndices.map((t) => timeDates[t]);
   timeStepHandler = (idx) => globalView.renderer.drawFrame(idx);
   ensureSliderWatcher();
   configureTimeSlider(validDates.length ? validDates : timeDates, {keepCurrent: keepView});
-  timeSlider.playRate = 250;
+  timeSlider.playRate = GLOBAL_PLAY_RATE_MS;
   timeSlider.loop = true; // loop when the user presses play
   const start = timeSlider.timeExtent?.start;
   const startIdx = start ? timeDates.findIndex((d) => d.getTime() === start.getTime()) : -1;
@@ -560,7 +686,7 @@ const exitGlobalView = () => {
   setActiveViewButton("regional");
   timeStepHandler = null;
   timeSlider.widget?.stop();
-  timeSlider.playRate = 1000;
+  timeSlider.playRate = REGIONAL_PLAY_RATE_MS;
   timeSlider.loop = false;
   if (globalView.renderer) {
     globalView.renderer.clear();
@@ -570,12 +696,15 @@ const exitGlobalView = () => {
   // shared legend when a regional layer takes over.
   boundaryLayer.visible = true;
   globalProgressDiv.classList.add("hidden");
-  mapLegendDiv.classList.add("hidden");
-  timeseriesPlotDiv.classList.remove("hidden");
+  setLegendAvailable(false);
+  panels.setChartVisible(true);
 };
 
 const main = async ({polygon, zoomPromise}) => {
   exitGlobalView();
+  // Remembered so a resolution switch can re-run this same region against the
+  // other store; cleared by resetLayers, which throws the analysis away.
+  lastAnalyzedPolygon = polygon;
   const runId = ++analysisRunSeq;
   regionalVariableHandler = null; // reinstalled once this run's data is ready
   await ensureTimeDates();
@@ -690,6 +819,10 @@ const main = async ({polygon, zoomPromise}) => {
       maxValue: Math.ceil(findMaxAbsForValidCells(values.data, values.shape, values.stride, validCellIndices)) || 30,
       firstValidStep: validTimeIndices.length ? validTimeIndices[0] : 0,
       sliderDates: validTimeDates.length ? validTimeDates : timeDates,
+      // False when the read succeeded but every cell is a fill value — an empty
+      // variable in the store, not a failed fetch. renderVariable says so rather
+      // than drawing an empty chart over uncolored cells.
+      hasData: validTimeIndices.length > 0,
     };
     return varData[varName];
   };
@@ -707,6 +840,8 @@ const main = async ({polygon, zoomPromise}) => {
       uncertainty: d.uncMeanSeries, // null when the store has no <var>_unc array
       name: short,
       longName,
+      units: UNITS,
+      valueLabel: VALUE_LABEL,
       fileStem: `grace_${varName.toLowerCase()}`,
     });
   };
@@ -753,7 +888,7 @@ const main = async ({polygon, zoomPromise}) => {
         field,
         stops: generateStops(),
         legendOptions: {
-          title: "Liquid Water Equivalent (cm)",
+          title: `${VALUE_LABEL} (${UNITS})`,
           showLegend: true  // show the color ramp
         }
       }]
@@ -832,16 +967,25 @@ const main = async ({polygon, zoomPromise}) => {
       console.error(`Failed to load ${varName} for this region`, err);
       if (runId !== analysisRunSeq || displayConfig.variable !== varName) return;
       anomalyLayer.visible = false;
-      mapLegendDiv.classList.add("hidden");
+      setLegendAvailable(false);
       showVariableUnavailable(varName);
       return;
     }
     if (runId !== analysisRunSeq || displayConfig.variable !== varName) return; // stale toggle or analysis
+    // Read fine, but the variable is empty in this store (see hasData). Drawing
+    // uncolored cells under a pointless chart would look like a broken render.
+    if (!d.hasData) {
+      console.warn(`${varName} read successfully for this region but contains no data — every value is a fill value`);
+      anomalyLayer.visible = false;
+      setLegendAvailable(false);
+      clearTimeseriesPanel(`<div class="flex h-full w-full items-center justify-center px-8 text-center text-2xl font-bold text-neutral-700">${VARIABLES[varName].longName} (${varName}) has no data in this dataset &mdash; choose another layer.</div>`);
+      return;
+    }
     displayConfig.maxValue = d.maxValue;
     anomalyLayer.renderer = createRenderer("anomaly");
     anomalyLayer.visible = true;
     updateMapLegend();
-    mapLegendDiv.classList.remove("hidden");
+    setLegendAvailable(true);
     plotTimeseries();
     configureTimeSlider(d.sliderDates, {keepCurrent: keepSlider});
     const start = timeSlider.timeExtent?.start;
@@ -859,6 +1003,7 @@ const resetLayers = () => {
   exitGlobalView();
   analysisRunSeq++; // abandon any in-flight regional analysis
   regionalVariableHandler = null;
+  lastAnalyzedPolygon = null;
   sketchTool.layer.removeAll();
   boundaryLayer.visible = true;
   boundaryLayer.definitionExpression = "1=1"; // reset to none selected
@@ -868,6 +1013,38 @@ const resetLayers = () => {
   const possiblyExistingLayer = arcgisMap.map.layers.find(l => l.title === "GRACE Anomalies");
   if (possiblyExistingLayer) arcgisMap.map.layers.remove(possiblyExistingLayer);
 }
+
+// Switch between the 1.0 and 0.5 degree stores. Every memoized read in this
+// module belongs to the store it came from — the coordinate arrays, the time
+// axis, the opened variable nodes, and each variable's whole-world frames — so
+// all of them are dropped together and whichever view is showing reloads itself.
+// Nothing is deleted from IndexedDB: its keys already carry the store URL, so a
+// switch back to a resolution that was loaded once is served from the cache.
+const setHalfDegreeCells = (enabled) => {
+  if (displayConfig.halfDegreeCells === enabled) return;
+  displayConfig.halfDegreeCells = enabled;
+
+  coordsPromise = null;
+  geoPromise = null;
+  timeDates = null;
+  timeDatesPromise = null;
+  for (const varName of Object.keys(varNodePromises)) delete varNodePromises[varName];
+  globalView.byVar = {};
+  globalView.gridVar = null;
+  globalView.geo = null;
+  globalView.renderer?.clear();
+
+  prefetchGlobalVariables();
+
+  if (globalView.active) {
+    analyzeGlobalView({keepView: true});
+  } else if (lastAnalyzedPolygon) {
+    // Same region, other store. The camera is already there, hence no zoom.
+    main({polygon: lastAnalyzedPolygon, zoomPromise: Promise.resolve()})
+      .catch((err) => console.error("Failed to re-run the analysis at the new resolution", err));
+  }
+  // Neither view showing (the instructions panel): the next analysis picks it up.
+};
 
 // Build a custom set of zoom levels (LODs) at half-step increments. The default
 // Web Mercator scheme halves the scale every level, so the jump from the most
@@ -905,6 +1082,11 @@ const bootMapUi = async () => {
   await arcgisMap.map.when();
   await arcgisMap.view.when()
   arcgisMap.view.constraints = {lods: halfZoomLODs, snapToZoom: true};
+  // Now that the half-step LODs are in place, VITE_MAP_ZOOM means a level in
+  // this scheme — the same one analyzeGlobalView's goTo uses. Applying it
+  // before the swap would silently double it (each old level is two new ones).
+  arcgisMap.view.goTo({center: MAP_CENTER, zoom: MAP_ZOOM}, {animate: false}).catch(() => {
+  });
   arcgisMap.map.add(boundaryLayer);
   // Preload the boundaries for later regional use; the camera is set by whichever
   // view we start in (global by default), so don't fit to the boundary extent here.
@@ -912,8 +1094,8 @@ const bootMapUi = async () => {
 
   // dock the overlays inside the map UI, adding them to each corner in stack
   // order: top-right holds the drawing tools, then the load-progress bar, the
-  // shared color-ramp legend, and the GWSa/TWSa dropdown beneath it; the
-  // compact time slider sits bottom-left.
+  // shared color bar, and the layer dropdown beneath it; the compact time
+  // slider sits bottom-left.
   arcgisMap.view.ui.add(sketchTool, "top-right");
   arcgisMap.view.ui.add(globalProgressDiv, "top-right");
   arcgisMap.view.ui.add(mapLegendDiv, "top-right");
@@ -924,8 +1106,8 @@ const bootMapUi = async () => {
     .querySelector("#global-view-button")
     .addEventListener("click", () => analyzeGlobalView());
 
-  // GWSa/TWSa dropdown: whichever view is active re-renders itself from the
-  // newly selected variable.
+  // Layer dropdown: whichever view is active re-renders itself from the newly
+  // selected variable.
   variableSelect.addEventListener("change", () => {
     displayConfig.variable = variableSelect.value;
     if (globalView.active) analyzeGlobalView({keepView: true});
@@ -933,9 +1115,17 @@ const bootMapUi = async () => {
     // neither view active (instructions showing): the next analysis picks it up
   });
 
-  // Global whole-world animation is the default view; enter it now that the map
-  // is ready so the loading screen shows and the world fills in on first paint.
-  analyzeGlobalView();
+  // Enter the view the deployment opens with (VITE_DEFAULT_VIEW) now that the
+  // map is ready. For the global view that means the loading bar shows and the
+  // world fills in on first paint; for the aquifer view it means the outlines
+  // and the instructions panel, at the camera .env configured — the aquifer
+  // button is what re-fits the map to the outlines' extent.
+  if (DEFAULT_VIEW === "global") {
+    analyzeGlobalView();
+  } else {
+    exitGlobalView();
+    clearTimeseriesPanel(appInstructions);
+  }
 
   sketchTool.availableCreateTools = ["polygon"];
   sketchTool.hideSelectionToolsRectangleSelection = true;
@@ -1021,10 +1211,7 @@ const bootMapUi = async () => {
     updateMapLegend();
   };
 
-  // Layer opacity slider
-  const opacitySlider = document.getElementById("opacity-slider");
-  const opacityValue = document.getElementById("opacity-value");
-  displayConfig.opacity = parseFloat(opacitySlider.value);
+  // Layer opacity slider (its starting value came from .env, above)
   opacitySlider.addEventListener("input", (e) => {
     displayConfig.opacity = parseFloat(e.target.value);
     opacityValue.textContent = `${Math.round(displayConfig.opacity * 100)}%`;
@@ -1044,18 +1231,31 @@ const bootMapUi = async () => {
     updateAnomalyLayerAppearance();
   });
 
-  // Color palette radio buttons
-  document.querySelectorAll('input[name="color-palette"]').forEach((radio) => {
-    radio.addEventListener("change", (e) => {
-      displayConfig.colorPalette = e.target.value;
-      updateAnomalyLayerAppearance();
-    });
+  // Color palette radio buttons (generated in syncSettingsControls, so one
+  // delegated listener rather than one per palette)
+  paletteOptions.addEventListener("change", (e) => {
+    if (e.target.name !== "color-palette") return;
+    displayConfig.colorPalette = e.target.value;
+    updateAnomalyLayerAppearance();
   });
 
   // Dynamic color scale toggle
   dynamicScaleToggle.addEventListener("change", (e) => {
     displayConfig.dynamicColorScale = e.target.checked;
     updateAnomalyLayerAppearance();
+  });
+
+  // Show/hide the color bar. Only the user's half of the decision — the views
+  // still hide it whenever there is no anomaly layer to describe.
+  legendToggle.addEventListener("change", (e) => {
+    displayConfig.showLegend = e.target.checked;
+    applyLegendVisibility();
+  });
+
+  // Half degree cells. Reloads from the other store, so it is the one setting
+  // here that costs a download rather than a restyle.
+  halfDegreeToggle.addEventListener("change", (e) => {
+    setHalfDegreeCells(e.target.checked);
   });
 
   // ---- Upload modal ----

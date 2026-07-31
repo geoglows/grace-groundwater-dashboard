@@ -14,6 +14,74 @@
 }
 
 /* ------------------------------------------------------------------ *
+ * Map / chart split. The column (#panel-stack) hands the chart panel a
+ * fixed share of its height and lets the map absorb the rest, so the
+ * divider only ever writes --chart-panel-size (splitPanels.js) and the
+ * ArcGIS view and Chart.js canvas follow via their own resize
+ * observers. The fallback matches VITE_CHART_PANEL_PERCENT's default,
+ * for the frame before the JS sets the property.
+ * ------------------------------------------------------------------ */
+.ts-panel {
+    flex: 0 0 var(--chart-panel-size, 32%);
+    min-height: 0;
+    overflow: hidden;
+}
+
+.panel-splitter {
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    /* Border-box, so this is the whole grab target including the 2px rule that
+       replaced the map's old bottom border. Small enough not to eat the map,
+       big enough to hit without aiming. */
+    height: 14px;
+    cursor: row-resize;
+    background: #e2e8f0;
+    border-top: 2px solid #000;
+    border-bottom: 1px solid #cbd5e1;
+    /* Pointer events must not be turned into scrolling/panning gestures, or a
+       touch drag would scroll the page instead of moving the divider. */
+    touch-action: none;
+}
+
+.panel-splitter:hover,
+.panel-splitter:focus-visible {
+    background: #bae6fd;
+    outline: none;
+}
+
+/* Three dots rather than a bar: the conventional "this is draggable" mark, and
+   readable at 14px without crowding the rule above it. */
+.panel-splitter-grip {
+    width: 34px;
+    height: 4px;
+    background: radial-gradient(circle, #64748b 1.6px, transparent 1.8px) repeat-x center / 12px 4px;
+}
+
+.panel-splitter:hover .panel-splitter-grip,
+.panel-splitter:focus-visible .panel-splitter-grip {
+    background: radial-gradient(circle, #0369a1 1.6px, transparent 1.8px) repeat-x center / 12px 4px;
+}
+
+/* These two elements are shown and hidden together (setChartVisible). Tailwind's
+   `hidden` utility sits in a cascade layer, which every unlayered rule in this
+   file outranks, so both need to opt out of their own display explicitly. */
+.panel-splitter.hidden,
+.ts-panel.hidden {
+    display: none;
+}
+
+/* While dragging, the cursor stays a resize cursor everywhere and nothing on the
+   page can be text-selected — the pointer is captured by the divider, so it
+   regularly travels across the map and the chart. */
+body.panel-resizing,
+body.panel-resizing * {
+    cursor: row-resize !important;
+    user-select: none;
+}
+
+/* ------------------------------------------------------------------ *
  * Time series chart (Chart.js). The chart canvas must size to the flex
  * row that holds it, so the wrapper is a positioning context and the
  * canvas box fills it absolutely — a plain block canvas with

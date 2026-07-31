@@ -47,13 +47,20 @@ Chart.register(timeMarkerPlugin);
 const LINE_COLOR = "#1c6eec";
 const BAND_COLOR = "rgba(28,110,236,0.25)";
 
+// `dates` carry the dataset's UTC calendar date in their LOCAL fields (see
+// toDisplayDate in main.js), so the day has to be read off those. toISOString()
+// would re-interpret them as instants and hand back the previous day for every
+// browser west of Greenwich.
+const isoDay = (date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+
 const toCsv = ({dates, values, uncertainty, name}) => {
   const header = uncertainty ? ["Date", name, `${name}_upper`, `${name}_lower`] : ["Date", name];
   const rows = [header.join(",")];
   for (let i = 0; i < dates.length; i++) {
     const center = values[i];
     if (!Number.isFinite(center)) continue; // missing GRACE months stay out of the file
-    const cells = [dates[i].toISOString().split("T")[0], center];
+    const cells = [isoDay(dates[i]), center];
     if (uncertainty) {
       const unc = uncertainty[i];
       const hasBand = Number.isFinite(unc);
@@ -77,11 +84,24 @@ const downloadCsv = (csv, filename) => {
 /**
  * Render the area-mean time series into `container`, replacing whatever it held.
  *
+ * `units` and `valueLabel` name the y axis and come from .env (settings.js), so
+ * the chart, the color bar, and the map's legend all read the same way.
+ *
  * Returns {setMarker(date), destroy()}. NaN samples (missing GRACE months and
  * the GRACE/GRACE-FO gap) are dropped rather than plotted, so the line bridges
  * gaps with a straight segment — the same behavior the Plotly version had.
  */
-export function renderTimeseriesChart({container, dates, values, uncertainty, name, longName, fileStem}) {
+export function renderTimeseriesChart({
+  container,
+  dates,
+  values,
+  uncertainty,
+  name,
+  longName,
+  units = "cm",
+  valueLabel = "Liquid Water Equivalent",
+  fileStem,
+}) {
   const line = [];
   const upper = [];
   const lower = [];
@@ -178,7 +198,7 @@ export function renderTimeseriesChart({container, dates, values, uncertainty, na
           grid: {color: "rgba(0,0,0,0.06)"},
         },
         y: {
-          title: {display: true, text: "Liquid Water Equivalent (cm)", color: "#333", font: {size: 12}},
+          title: {display: true, text: `${valueLabel} (${units})`, color: "#333", font: {size: 12}},
           ticks: {color: "#333"},
           grid: {
             // Zero is the reference every anomaly is read against, so its
@@ -202,7 +222,7 @@ export function renderTimeseriesChart({container, dates, values, uncertainty, na
           // would otherwise add two noise rows to every tooltip.
           filter: (item) => item.datasetIndex === datasets.length - 1,
           callbacks: {
-            label: (item) => `${name}: ${item.parsed.y.toFixed(2)} cm`,
+            label: (item) => `${name}: ${item.parsed.y.toFixed(2)} ${units}`,
           },
         },
       },

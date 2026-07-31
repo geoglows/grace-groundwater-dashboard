@@ -24,15 +24,28 @@ const fromEnv = (value, fallback) => {
 };
 
 // The zarr store holding every mapped variable, its coordinates, and time axis.
+// data/main.py writes one store per target resolution, and the app can be
+// pointed at either: the 1.0 degree store is what it loads by default, and the
+// half degree store is opt-in (the "half degree water balance cells" setting,
+// defaulting to VITE_SETTINGS_HALF_DEGREE_CELLS). Everything downstream —
+// cell size, the map raster's georeferencing, the IndexedDB cache keys — is
+// derived from whichever store is active, so the two never mix.
 export const ZARR_URL = fromEnv(
-  import.meta.env.VITE_ZARR_URL,
-  "https://d3hbj0z0f67zhd.cloudfront.net/ggg/grace-gldas-water-balance.zarr",
+  import.meta.env.VITE_ZARR_URL_ONE_DEGREE,
+).replace(/\/+$/, "");
+
+// The half degree store. Its default follows data/main.py's output naming; a
+// deployment that has not published one can leave the setting off, and the app
+// reports the store as unavailable if it is switched on anyway.
+export const ZARR_URL_HALF_DEGREE = fromEnv(
+  import.meta.env.VITE_ZARR_URL_HALF_DEGREE,
+  "https://d3hbj0z0f67zhd.cloudfront.net/ggg/grace-gldas-water-balance-0.5.zarr",
 ).replace(/\/+$/, "");
 
 // Aquifer outlines. Served from public/ by default; point VITE_AQUIFERS_URL at
 // an absolute https:// URL to serve the 2 MB file from a CDN instead.
 export const AQUIFERS_URL = fromEnv(import.meta.env.VITE_AQUIFERS_URL, asset("aquifers.geojson"));
 
-// Where the "back to portal" logo links. Defaults to the app's own base path
-// (i.e. reload this app) when the portal location is not configured.
-export const PORTAL_URL = fromEnv(import.meta.env.VITE_PORTAL_URL, BASE_URL);
+// Nothing here resolves the header logo or its link: index.html carries those as
+// %VITE_LOGO_SRC% / %VITE_LOGO_HREF% template strings, substituted by Vite at
+// build time and used verbatim in the served HTML.
