@@ -149,7 +149,7 @@ body.panel-resizing * {
     outline: none;
 }
 
-/* The source image is 473x80. Constraining the width and leaving both
+/* The source image is 354x60. Constraining the width and leaving both
    dimensions `auto` lets the intrinsic ratio drive the height; pinning a
    height instead would let max-width squash the logo horizontally. */
 .nav-bar-wrapper .back-to-portal-logo {

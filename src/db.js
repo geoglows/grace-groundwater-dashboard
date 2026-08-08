@@ -117,9 +117,6 @@ async function getOrFetch1DCoord(zarrUrl, varName) {
   const arr = await openZarrArray(zarrUrl, varName);
   const z = await get(arr, [null]); // z.data is a TypedArray in zarrita
 
-  // A coordinate chunk swallowed by a transient (CORS-hidden) fetch error
-  // comes back as fill-value NaNs; caching that would break the app until the
-  // next DB version bump, so fail loudly instead.
   if (z.data.some((v) => !Number.isFinite(v))) {
     throw new Error(`Coordinate array ${varName} contains non-finite values; the data service may be temporarily unavailable`);
   }
