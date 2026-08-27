@@ -133,9 +133,11 @@ if __name__ == "__main__":
     root = Path(args.root)
     output_directory = root / 'zarrs'
     output_directory.mkdir(parents=True, exist_ok=True)
-    grace_mascon = list(root.glob('GRCTellus*.nc')).pop(0)
+    grace_mascon = list(natsorted(root.glob('GRCTellus*.nc'))).pop(-1)
+    print(f"Using GRACE MASCON file: {grace_mascon}")
 
     target_resolution = args.resolution
+    target_resolution = 1.0
     assert target_resolution in (0.5, 1.0), f"Target resolution must be either 0.5 or 1.0 degree"
 
     output_dataset = output_directory / f'grace-gldas-water-balance-{target_resolution}.zarr'
@@ -149,7 +151,7 @@ if __name__ == "__main__":
     print("Opening GRACE MASCON dataset")
     grace = (
         xr
-        .open_dataset(root / 'GRCTellus.JPL.200204_202604.GLO.RL06.3M.MSCNv04CRI.nc')
+        .open_dataset(root / grace_mascon)
         .rename({'lwe_thickness': 'TWSa', 'uncertainty': 'TWSa_unc'})
         [['TWSa', 'TWSa_unc']]
     )
@@ -279,7 +281,7 @@ if __name__ == "__main__":
         .to_zarr(
             output_dataset,
             mode='w',
-            consolidated=False,  # because xarray defaults to true and gives warnings even though writing a zarr v3
+            consolidated=True,  # when creating, xarray warns to use false. When reading, it is mad if you didn't
             compute=True,
             zarr_format=3,
             encoding={
